@@ -432,3 +432,4 @@
 # This is the end of the legacy x32 range.  Numbers 548 and above are
 # not special and are not to be used for x32-specific syscalls.
 548	common	move_mouse  sys_move_mouse
+549	common send_key_event sys_send_key_event
