@@ -11,7 +11,7 @@ int main(int argc, char *argv[]) {
     long result = syscall(SYS_SEND_KEY_EVENT, keycode);
 
     if (result == 0) {
-        printf("Enviando tecla keycode=%d exitosamente.\n", keycode);
+        printf("Enviando tecla: keycode=%d exitosamente.\n", keycode);
     } else {
         fprintf(stderr, "Error\n");
         exit(EXIT_FAILURE);
