@@ -4,15 +4,14 @@
 #include <string.h>
 #include <errno.h>
 
-#define SYS_MOVE_MOUSE 548
+#define SYS_SEND_KEY_EVENT 549
 
 int main(int argc, char *argv[]) {
-    int dx = strtol(argv[1], NULL, 10);
-    int dy = strtol(argv[2], NULL, 10);
-    long result = syscall(SYS_MOVE_MOUSE, dx, dy);
+    int keycode = strtol(argv[1], NULL, 10);
+    long result = syscall(SYS_SEND_KEY_EVENT, keycode);
 
     if (result == 0) {
-        printf("Movimiendo el mouse: dx=%d, dy=%d exitosamente.\n", dx, dy);
+        printf("Enviando tecla keycode=%d exitosamente.\n", keycode);
     } else {
         fprintf(stderr, "Error\n");
         exit(EXIT_FAILURE);
@@ -21,4 +20,4 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
 }
 
-// gcc -o test_mouse test_mouse.c
+// gcc -o test_teclado test_teclado.c
