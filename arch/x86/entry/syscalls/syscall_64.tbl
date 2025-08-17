@@ -433,3 +433,4 @@
 # not special and are not to be used for x32-specific syscalls.
 548	common	move_mouse  sys_move_mouse
 549	common send_key_event sys_send_key_event
+550 common get_screen_resolution sys_get_screen_resolution

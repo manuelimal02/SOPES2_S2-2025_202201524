@@ -33,7 +33,6 @@ static int init_usac_keyboard(void)
     __set_bit(REL_Y, teclado_202201524->relbit);
     __set_bit(BTN_LEFT, teclado_202201524->keybit);  
 
-    // Habilitamos todos los keycodes posibles (hasta KEY_CNT)
     for (i = 0; i < KEY_CNT; i++) {
         __set_bit(i, teclado_202201524->keybit);
     }
@@ -64,10 +63,10 @@ SYSCALL_DEFINE1(send_key_event, int, keycode)
         }
     }
 
-    input_report_key(teclado_202201524, keycode, 1);  // Simulamos keydown
+    input_report_key(teclado_202201524, keycode, 1); 
     input_sync(teclado_202201524);
 
-    input_report_key(teclado_202201524, keycode, 0);  // Simulamos keyup
+    input_report_key(teclado_202201524, keycode, 0);
     input_sync(teclado_202201524);
 
     mutex_unlock(&keyboard_mutex);
