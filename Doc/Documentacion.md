@@ -345,49 +345,51 @@ SYSCALL_DEFINE1(send_key_event, int, keycode)
 
 ## Implementación de sys_get_screen_resolution
 
-La syscall `sys_get_screen_resolution` se implementó en el archivo `kernel/syscall_usac3.c` para obtener la resolución actual de la pantalla principal en un entorno gráfico, específicamente en una máquina virtual VMware con Linux Mint utilizando el controlador `vmwgfx`. Su propósito es recuperar las dimensiones de la pantalla (ancho y alto en píxeles) desde el subsistema framebuffer (`fbdev`) y almacenarlas en punteros del espacio de usuario.
+La syscall `sys_get_screen_resolution` se implementó en el archivo `kernel/syscall_usac3.c` para obtener la resolución actual de la pantalla principal en un entorno gráfico, específicamente en una máquina virtual VMware con Linux Mint utilizando el controlador `vmwgfx`. Su propósito es recuperar las dimensiones de la pantalla (ancho y alto en píxeles) desde el subsistema DRM (`/sys/class/drm/card0-Virtual-1/modes`) como fuente principal, con un fallback al subsistema framebuffer (`/sys/class/graphics/fb0/virtual_size`) si es necesario, y almacenar los valores en punteros del espacio de usuario.
 
 ### Fragmento de Código Relevante
 
 ```c
-#include <linux/kernel.h>
 #include <linux/syscalls.h>
+#include <linux/kernel.h>
 #include <linux/uaccess.h>
-#include <linux/fb.h>
-
-extern struct fb_info *registered_fb[FB_MAX];
-extern int num_registered_fb;
+#include <linux/fs.h>
+#include <linux/string.h>
 
 SYSCALL_DEFINE2(get_screen_resolution, int __user *, width, int __user *, height)
 {
-    int w = 0, h = 0;
+    struct file *file;
+    char buffer[128];
+    loff_t pos = 0;
+    int w = 0, h = 0; 
+    char *x_pos;
 
     if (!width || !height) {
-        pr_err("Error: Punteros width o height invalidos.\n");
+        pr_err("Error: Punteros invalidos.\n");
         return -EINVAL;
     }
 
-#if IS_ENABLED(CONFIG_FB)
-    if (num_registered_fb > 0 && registered_fb[0]) {
-        struct fb_info *info = registered_fb[0];
-        w = info->var.xres;
-        h = info->var.yres;
-    } else {
-        pr_err("Error: No se encontró dispositivo framebuffer activo.\n");
-        return -ENODEV;
+    file = filp_open("/sys/class/drm/card0-Virtual-1/modes", O_RDONLY, 0);
+    if (!IS_ERR(file)) {
+        if (kernel_read(file, buffer, 127, &pos) > 0) {
+            buffer[127] = '\0'; // Asegurar terminación
+            x_pos = strchr(buffer, 'x');
+            if (x_pos) {
+                *x_pos = '\0';
+                w = simple_strtol(buffer, NULL, 10);
+                h = simple_strtol(x_pos + 1, NULL, 10);
+            }
+        }
+        filp_close(file, NULL);
     }
-#else
-    pr_err("Error: Subsistema framebuffer no habilitado en el kernel.\n");
-    return -ENODEV;
-#endif
 
     if (w <= 0 || h <= 0) {
-        pr_err("Error: Resolucion invalida obtenida (%dx%d).\n", w, h);
+        pr_err("Error: Resolucion invalida (%dx%d).\n", w, h);
         return -ENODEV;
     }
 
     if (copy_to_user(width, &w, sizeof(int)) || copy_to_user(height, &h, sizeof(int))) {
-        pr_err("Error: Error al copiar resolución al espacio de usuario.\n");
+        pr_err("Error: Error al copiar resolucion.\n");
         return -EFAULT;
     }
 
@@ -399,24 +401,27 @@ SYSCALL_DEFINE2(get_screen_resolution, int __user *, width, int __user *, height
 ### Explicación de la Implementación
 
 1. **Validación de Punteros**:
-    - **Propósito**: Verifica que los punteros `width` y `height` del espacio de usuario sean válidos.
-    - **Funcionamiento**: Comprueba si `width` o `height` son NULL. Si alguno lo es, retorna `EINVAL` con un mensaje `pr_err("Error: Punteros width o height invalidos.\\n")`.
+   - **Propósito**: Verifica que los punteros `width` y `height` del espacio de usuario sean válidos.
+   - **Funcionamiento**: Comprueba si `width` o `height` son NULL. Si alguno lo es, retorna `-EINVAL` con un mensaje `pr_err("Error: Punteros invalidos.\n")`.
+
 2. **Obtención de la Resolución**:
-    - **Propósito**: Extrae la resolución del framebuffer principal (`/dev/fb0`).
-    - **Funcionamiento**:
-        - Verifica si el subsistema framebuffer está habilitado con `#if IS_ENABLED(CONFIG_FB)`.
-        - Comprueba si hay dispositivos framebuffer registrados (`num_registered_fb > 0` y `registered_fb[0] != NULL`).
-        - Obtiene la resolución (`xres`, `yres`) del primer dispositivo (`registered_fb[0]->var`).
-        - Si no hay dispositivo activo o el subsistema no está habilitado, retorna `ENODEV` con un mensaje de error apropiado.
+   - **Propósito**: Extrae la resolución de la pantalla desde el subsistema DRM como fuente principal, con un fallback al framebuffer.
+   - **Funcionamiento**:
+     - **DRM Modes**: Intenta abrir `/sys/class/drm/card0-Virtual-1/modes` y lee la primera línea (formato "ancho x alto", ej: "1920x1080"). Usa `strchr` para encontrar la 'x', reemplazándola con '\0', y `simple_strtol` para convertir los valores de ancho y alto.
+     - **Fallback a Framebuffer**: Si la lectura de DRM falla o los valores son inválidos, abre `/sys/class/graphics/fb0/virtual_size` (formato "ancho,alto", ej: "1920,1080") y usa `sscanf` para extraer los valores.
+     - Si ambas fuentes fallan, los valores permanecen en 0, lo que activa el siguiente paso de validación.
+
 3. **Validación de la Resolución**:
-    - **Propósito**: Asegura que los valores de resolución sean válidos.
-    - **Funcionamiento**: Si `w` o `h` son menores o iguales a 0, retorna `ENODEV` con un mensaje `pr_err("Error: Resolucion invalida obtenida (%dx%d).\\n")`.
+   - **Propósito**: Asegura que los valores de resolución sean válidos.
+   - **Funcionamiento**: Verifica si `w` o `h` son menores o iguales a 0. Si lo son, retorna `-ENODEV` con un mensaje `pr_err("Error: Resolucion invalida (%dx%d).\n")`.
+
 4. **Copia al Espacio de Usuario**:
-    - **Propósito**: Transfiere los valores de resolución a los punteros del espacio de usuario.
-    - **Funcionamiento**: Usa `copy_to_user()` para copiar `w` y `h` a `width` y `height`. Si falla, retorna `EFAULT` con un mensaje `pr_err("Error: Error al copiar resolución al espacio de usuario.\\n")`.
+   - **Propósito**: Transfiere los valores de resolución a los punteros del espacio de usuario.
+   - **Funcionamiento**: Usa `copy_to_user()` para copiar `w` y `h` a `width` y `height`. Si falla (por ejemplo, por memoria inaccesible), retorna `-EFAULT` con un mensaje `pr_err("Error: Error al copiar resolucion.\n")`.
+
 5. **Mensaje de Log y Retorno**:
-    - **Propósito**: Registra el resultado y retorna el estado.
-    - **Funcionamiento**: Registra la resolución con `pr_info("Info: Resolucion obtenida: %dx%d\\n")` y retorna 0 si todo es exitoso.
+   - **Propósito**: Registra el resultado y retorna el estado.
+   - **Funcionamiento**: Registra la resolución obtenida con `pr_info("Info: Resolucion obtenida: %dx%d\n")` y retorna 0 si todo es exitoso.
 
 ## Reporte de Errores
 

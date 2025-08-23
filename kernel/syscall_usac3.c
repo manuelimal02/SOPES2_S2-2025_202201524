@@ -1,41 +1,43 @@
-#include <linux/kernel.h>
 #include <linux/syscalls.h>
+#include <linux/kernel.h>
 #include <linux/uaccess.h>
-#include <linux/fb.h>
-
-extern struct fb_info *registered_fb[FB_MAX];
-extern int num_registered_fb;
+#include <linux/fs.h>
+#include <linux/string.h>
 
 SYSCALL_DEFINE2(get_screen_resolution, int __user *, width, int __user *, height)
 {
-    int w = 0, h = 0;
+    struct file *file;
+    char buffer[128];
+    loff_t pos = 0;
+    int w = 0, h = 0; 
+    char *x_pos;
 
     if (!width || !height) {
-        pr_err("Error: Punteros width o height invalidos.\n");
+        pr_err("Error: Punteros invalidos.\n");
         return -EINVAL;
     }
 
-#if IS_ENABLED(CONFIG_FB)
-    if (num_registered_fb > 0 && registered_fb[0]) {
-        struct fb_info *info = registered_fb[0];
-        w = info->var.xres;
-        h = info->var.yres;
-    } else {
-        pr_err("Error: No se encontró dispositivo framebuffer activo.\n");
-        return -ENODEV;
+    file = filp_open("/sys/class/drm/card0-Virtual-1/modes", O_RDONLY, 0);
+    if (!IS_ERR(file)) {
+        if (kernel_read(file, buffer, 127, &pos) > 0) {
+            buffer[127] = '\0'; // Asegurar terminación
+            x_pos = strchr(buffer, 'x');
+            if (x_pos) {
+                *x_pos = '\0';
+                w = simple_strtol(buffer, NULL, 10);
+                h = simple_strtol(x_pos + 1, NULL, 10);
+            }
+        }
+        filp_close(file, NULL);
     }
-#else
-    pr_err("Error: Subsistema framebuffer no habilitado en el kernel.\n");
-    return -ENODEV;
-#endif
 
     if (w <= 0 || h <= 0) {
-        pr_err("Error: Resolucion invalida obtenida (%dx%d).\n", w, h);
+        pr_err("Error: Resolucion invalida (%dx%d).\n", w, h);
         return -ENODEV;
     }
 
     if (copy_to_user(width, &w, sizeof(int)) || copy_to_user(height, &h, sizeof(int))) {
-        pr_err("Error: Error al copiar resolución al espacio de usuario.\n");
+        pr_err("Error: Error al copiar resolucion.\n");
         return -EFAULT;
     }
 
