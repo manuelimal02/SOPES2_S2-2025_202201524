@@ -1,4 +1,4 @@
-# SOPES2_S2-2025_PRA1_202201524
+# SOPES2_S2-2025_202201524
 
 ## Carlos Manuel Lima y Lima
 **Carnet:** 202201524  
