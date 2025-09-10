@@ -8,13 +8,13 @@
 
 int main() {
     char buffer[256];
-    size_t len;
-    long result = syscall(SYS_IPC_CHANNEL_RECEIVE, buffer, &len);
+    size_t longitud;
+    long resultado = syscall(SYS_IPC_CHANNEL_RECEIVE, buffer, &longitud);
 
-    if (result == 0) {
-        printf("Mensaje recibido: %.*s\n", (int)len, buffer);
+    if (resultado == 0) {
+        printf("Mensaje Recibido: %.*s\n", (int)longitud, buffer);
     } else {
-        fprintf(stderr, "Error al recibir mensaje: %s\n", strerror(-result));
+        fprintf(stderr, "Error Al Recibir Mensaje: %s\n", strerror(-resultado));
         exit(EXIT_FAILURE);
     }
 

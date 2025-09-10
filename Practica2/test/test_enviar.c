@@ -8,18 +8,18 @@
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "Uso: %s <mensaje>\n", argv[0]);
+        fprintf(stderr, "Uso: %s <mensaje_usuario>\n", argv[0]);
         exit(EXIT_FAILURE);
     }
 
-    const char *message = argv[1];
-    size_t len = strlen(message) + 1;
-    long result = syscall(SYS_IPC_CHANNEL_SEND, message, len);
+    const char *mensaje = argv[1];
+    size_t longitud = strlen(mensaje) + 1;
+    long resultado = syscall(SYS_IPC_CHANNEL_SEND, mensaje, longitud);
 
-    if (result == 0) {
-        printf("Mensaje enviado: %s\n", message);
+    if (resultado == 0) {
+        printf("Mensaje Enviado: %s\n", mensaje);
     } else {
-        fprintf(stderr, "Error al enviar mensaje: %s\n", strerror(-result));
+        fprintf(stderr, "Error Al Enviar Mensaje: %s\n", strerror(-resultado));
         exit(EXIT_FAILURE);
     }
 

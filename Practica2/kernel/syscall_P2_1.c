@@ -6,69 +6,69 @@
 #include <linux/wait.h>
 #include <linux/uaccess.h>
 
-struct ipc_msg {
-    struct list_head list;
-    char *data;
-    size_t len;
+struct mensaje_ipc {
+    struct list_head nodo_lista;
+    char *contenido;
+    size_t longitud;
 };
 
-static struct list_head msg_queue = LIST_HEAD_INIT(msg_queue);
-static DEFINE_MUTEX(ipc_mutex);
-static DECLARE_WAIT_QUEUE_HEAD(ipc_wait);
+static struct list_head cola_mensajes = LIST_HEAD_INIT(cola_mensajes);
+static DEFINE_MUTEX(mutex_cola);
+static DECLARE_WAIT_QUEUE_HEAD(cola_espera);
 
-SYSCALL_DEFINE2(ipc_channel_send, const void __user *, msg, size_t, len) {
-    struct ipc_msg *new_msg = kmalloc(sizeof(*new_msg), GFP_KERNEL);
-    if (!new_msg) return -ENOMEM;
+SYSCALL_DEFINE2(ipc_channel_send, const void __user *, mensaje_usuario, size_t, longitud_mensaje) {
+    struct mensaje_ipc *nuevo_mensaje = kmalloc(sizeof(*nuevo_mensaje), GFP_KERNEL);
+    if (!nuevo_mensaje) return -ENOMEM;
 
-    new_msg->data = kmalloc(len, GFP_KERNEL);
-    if (!new_msg->data) {
-        kfree(new_msg);
+    nuevo_mensaje->contenido = kmalloc(longitud_mensaje, GFP_KERNEL);
+    if (!nuevo_mensaje->contenido) {
+        kfree(nuevo_mensaje);
         return -ENOMEM;
     }
 
-    if (copy_from_user(new_msg->data, msg, len)) {
-        kfree(new_msg->data);
-        kfree(new_msg);
+    if (copy_from_user(nuevo_mensaje->contenido, mensaje_usuario, longitud_mensaje)) {
+        kfree(nuevo_mensaje->contenido);
+        kfree(nuevo_mensaje);
         return -EFAULT;
     }
-    new_msg->len = len;
+    nuevo_mensaje->longitud = longitud_mensaje;
 
-    mutex_lock(&ipc_mutex);
-    list_add_tail(&new_msg->list, &msg_queue);
-    mutex_unlock(&ipc_mutex);
+    mutex_lock(&mutex_cola);
+    list_add_tail(&nuevo_mensaje->nodo_lista, &cola_mensajes);
+    mutex_unlock(&mutex_cola);
 
-    wake_up_interruptible(&ipc_wait);
+    wake_up_interruptible(&cola_espera);
     return 0;
 }
 
-SYSCALL_DEFINE2(ipc_channel_receive, void __user *, msg, size_t __user *, len) {
-    struct ipc_msg *m;
-    int ret = 0;
+SYSCALL_DEFINE2(ipc_channel_receive, void __user *, mensaje_usuario, size_t __user *, longitud_usuario) {
+    struct mensaje_ipc *mensaje;
+    int resultado = 0;
 
-    wait_event_interruptible(ipc_wait, !list_empty(&msg_queue));
+    wait_event_interruptible(cola_espera, !list_empty(&cola_mensajes));
 
-    mutex_lock(&ipc_mutex);
-    if (list_empty(&msg_queue)) {
-        ret = -EAGAIN;
-        goto out;
+    mutex_lock(&mutex_cola);
+    if (list_empty(&cola_mensajes)) {
+        resultado = -EAGAIN;
+        goto salir;
     }
 
-    m = list_first_entry(&msg_queue, struct ipc_msg, list);
-    list_del(&m->list);
+    mensaje = list_first_entry(&cola_mensajes, struct mensaje_ipc, nodo_lista);
+    list_del(&mensaje->nodo_lista);
 
-    if (copy_to_user(len, &m->len, sizeof(size_t))) {
-        ret = -EFAULT;
-        goto free;
+    if (copy_to_user(longitud_usuario, &mensaje->longitud, sizeof(size_t))) {
+        resultado = -EFAULT;
+        goto liberar;
     }
-    if (copy_to_user(msg, m->data, m->len)) {
-        ret = -EFAULT;
-        goto free;
+    if (copy_to_user(mensaje_usuario, mensaje->contenido, mensaje->longitud)) {
+        resultado = -EFAULT;
+        goto liberar;
     }
 
-free:
-    kfree(m->data);
-    kfree(m);
-out:
-    mutex_unlock(&ipc_mutex);
-    return ret;
+liberar:
+    kfree(mensaje->contenido);
+    kfree(mensaje);
+salir:
+    mutex_unlock(&mutex_cola);
+    return resultado;
 }
