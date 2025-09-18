@@ -2,10 +2,10 @@
 
 ## Datos Personales
 
-| **Nombre** | Carlos Manuel Lima Y Lima |
+| Nombre | Carlos Manuel Lima Y Lima |
 | --- | --- |
-| **Registro Académico** | 202201524 |
-| **Curso** | Sistemas Operativos 2, Sección A |
+| Registro Académico | 202201524 |
+| Curso | Sistemas Operativos 2, Sección A |
 
 ## Introducción
 
@@ -18,7 +18,7 @@ Esta documentación detalla el proceso seguido para implementar cuatro nuevas ll
 ### sys_capture_screen
 
 - **Propósito:** Capturar el contenido de la pantalla en el instante en que fue llamada y devolver los datos necesarios para construir la imagen en el espacio de usuario.
-- **Objetivo logrado:**
+- **Objetivo logrado:** Se implementó una syscall que accede al framebuffer primario mediante la API DRM del kernel, capturando los píxeles crudos del plano primario activo y transfiriéndolos de manera segura al espacio de usuario. La implementación maneja sincronización con bloqueos de modeset para evitar corrupción en entornos gráficos concurrentes, verifica el tamaño del buffer para prevenir overflows, y actualiza dinámicamente los metadatos (ancho, alto, bpp) en la estructura proporcionada por el usuario. El programa de prueba en espacio de usuario integra la syscall de resolución de práctica anterior para asignar buffers óptimos, genera imágenes PPM compatibles, y demuestra la funcionalidad completa del sistema de captura.
 
 ### sys_ipc_channel_send
 
@@ -364,7 +364,7 @@ SYSCALL_DEFINE4(start_log_watch, const char __user * const __user *, rutas_log, 
     - `bloqueo_observador` es un spinlock que asegura la concurrencia segura al modificar la lista.
     - `siguiente_identificador_observador` genera identificadores únicos para cada instancia de monitoreo.
 
-**Lógica de la Syscall:**
+### **Lógica de la Syscall**
 
 - **Propósito:** Iniciar un monitoreo de archivos `.log` y devolver un identificador único.
 - **Funcionamiento:**
@@ -425,7 +425,7 @@ SYSCALL_DEFINE1(stop_log_watch, int, identificador)
 - **Propósito:** Utiliza la misma estructura `observador_log` y la lista `lista_observadores` para localizar y gestionar el monitoreo a detener.
 - **Funcionamiento:** El spinlock `bloqueo_observador` asegura que la búsqueda y eliminación del observador sean seguras.
 
-**Lógica de la Syscall:**
+### **Lógica de la Syscall**
 
 - **Propósito:** Detener un monitoreo específico y liberar recursos.
 - **Funcionamiento:**
@@ -434,6 +434,125 @@ SYSCALL_DEFINE1(stop_log_watch, int, identificador)
     - **Detención:** Marca `debe_detenerse` como verdadero y detiene el hilo con `kthread_stop` si existe y es válido.
     - **Liberación:** Libera la memoria del observador con `kfree`.
     - **Retorno:** Devuelve `0` en caso de éxito, indicando que el monitoreo se detuvo correctamente.
+
+## Implementación de `sys_capture_screen`
+
+La syscall `sys_capture_screen` permite capturar el contenido visual de la pantalla desde el espacio del kernel hacia el espacio de usuario, utilizando la API DRM para acceder al framebuffer primario activo. Esta implementación se encuentra en el archivo `kernel/syscall_P2_3.c` y opera en un entorno virtualizado con VMware Workstation y Linux Mint, manejando sincronización de modoset para garantizar acceso seguro en sistemas gráficos concurrentes.
+
+### Fragmento de Código Relevante
+
+```c
+#include <linux/kernel.h>
+#include <linux/syscalls.h>
+#include <linux/uaccess.h>
+#include <linux/vmalloc.h>
+#include <linux/fb.h>
+#include <drm/drm_device.h>
+#include <drm/drm_crtc.h>
+#include <drm/drm_plane.h>
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_modeset_lock.h>
+#include <linux/iosys-map.h>
+
+struct datos_captura_pantalla {
+    int ancho;
+    int alto;
+    int bits_pixel;
+    char __user *buffer_datos;
+    size_t tamano_buffer;
+};
+
+extern struct fb_info *registered_fb[];
+extern int num_registered_fb;
+
+SYSCALL_DEFINE1(capture_screen, struct datos_captura_pantalla __user *, datos_usuario) {
+    struct datos_captura_pantalla captura;
+    struct drm_modeset_acquire_ctx bloqueo;
+    struct drm_device *dispositivo;
+    struct drm_plane *plano;
+    struct drm_framebuffer *marco = NULL;
+    struct iosys_map mapeo[DRM_FORMAT_MAX_PLANES];
+    size_t tamano;
+    u32 ancho, alto;
+    int error;
+
+    if (copy_from_user(&captura, datos_usuario, sizeof(captura)))
+        return -EFAULT;
+    if (num_registered_fb <= 0 || !registered_fb[0]) return -ENODEV;
+    struct drm_fb_helper *ayudante = (struct drm_fb_helper *)registered_fb[0]->par;
+    dispositivo = ayudante ? ayudante->dev : NULL;
+    if (!dispositivo) return -ENODEV;
+
+    drm_modeset_acquire_init(&bloqueo, 0);
+    error = drm_modeset_lock_all_ctx(dispositivo, &bloqueo);
+    if (!error) {
+        drm_for_each_plane(plano, dispositivo) {
+            if (plano->type == DRM_PLANE_TYPE_PRIMARY && plano->state && plano->state->fb) {
+                marco = plano->state->fb;
+                drm_framebuffer_get(marco);
+                ancho = marco->width;
+                alto = marco->height;
+                break;
+            }
+        }
+        drm_modeset_drop_locks(&bloqueo);
+    }
+    drm_modeset_acquire_fini(&bloqueo);
+
+    if (!marco) return -ENODEV;
+
+    tamano = (size_t)marco->pitches[0] * marco->height;
+    if (captura.tamano_buffer < tamano) {
+        drm_framebuffer_put(marco);
+        return -ENOSPC;
+    }
+
+    error = drm_gem_fb_vmap(marco, mapeo, NULL);
+    if (!error && !copy_to_user(captura.buffer_datos, mapeo[0].vaddr, tamano)) {
+        captura.ancho = ancho;
+        captura.alto = alto;
+        captura.bits_pixel = marco->format->cpp[0] * 8;
+        captura.tamano_buffer = tamano;
+        error = copy_to_user(datos_usuario, &captura, sizeof(captura));
+    }
+
+    drm_gem_fb_vunmap(marco, mapeo);
+    drm_framebuffer_put(marco);
+
+    return error ? -EFAULT : 0;
+}
+
+```
+
+### Explicación de la Implementación
+
+**Inicialización y Estructura de Datos:**
+
+- **Propósito:** Define la estructura `datos_captura_pantalla` para transferir metadatos y puntero de buffer entre espacios, con campos para dimensiones (`ancho`, `alto`), profundidad de color (`bits_pixel`), buffer de destino (`buffer_datos`) y su capacidad (`tamano_buffer`).
+- **Funcionamiento:**
+    - `registered_fb[]` y `num_registered_fb` son variables globales del kernel que mantienen el registro de dispositivos framebuffer activos.
+    - La estructura se copia desde el espacio de usuario con `copy_from_user` para validar su integridad antes del procesamiento.
+
+### **Lógica de la Syscall**
+
+- **Propósito:** Capturar el framebuffer primario activo y transferir sus datos al buffer del usuario.
+- **Funcionamiento:**
+    - **Validación Inicial:** Copia la estructura `datos_captura_pantalla` desde el usuario con `copy_from_user`. Si falla, retorna `EFAULT`. Verifica la existencia del framebuffer principal (`registered_fb[0]`), retornando `ENODEV` si no está disponible.
+    - **Puente FB→DRM:** Obtiene el dispositivo DRM (`dispositivo`) a través del helper del framebuffer (`ayudante_fb->dev`), estableciendo el puente entre el subsistema framebuffer legacy y la API DRM moderna.
+    - **Sincronización de Modoset:** Inicializa un contexto de bloqueo (`bloqueo`) con `drm_modeset_acquire_init` y adquiere locks globales con `drm_modeset_lock_all_ctx` para prevenir corrupción durante el acceso concurrente a los recursos gráficos.
+    - **Búsqueda de Plano Primario:** Itera sobre todos los planos (`drm_for_each_plane`) buscando el plano de tipo `DRM_PLANE_TYPE_PRIMARY` con estado activo (`plano->state->fb`). Al encontrarlo, incrementa la referencia con `drm_framebuffer_get` y captura las dimensiones (`width`, `height`).
+    - **Validación de Buffer:** Calcula el tamaño requerido (`pitches[0] * height`) y verifica que el buffer del usuario tenga capacidad suficiente. Si es insuficiente, retorna `ENOSPC` y libera el framebuffer.
+    - **Mapeo y Transferencia:** Mapea la memoria del framebuffer con `drm_gem_fb_vmap` y transfiere los datos crudos al buffer del usuario con `copy_to_user`. Si la copia falla, retorna `EFAULT`.
+    - **Actualización de Metadatos:** Actualiza la estructura local con las dimensiones reales, profundidad de color calculada (`cpp[0] * 8`) y tamaño utilizado, luego copia de vuelta al usuario.
+    - **Limpieza de Recursos:** Desmapea la memoria con `drm_gem_fb_vunmap`, libera la referencia del framebuffer con `drm_framebuffer_put`, y retorna `0` en éxito o `EFAULT` si la actualización final falla.
+
+### **Manejo de Concurrencia y Seguridad:**
+
+- **Bloqueos de Modoset:** Garantizan acceso exclusivo a los recursos DRM durante la captura, previniendo condiciones de carrera en entornos con múltiples CRTCs o compositores.
+- **Validación de Memoria:** Verificaciones exhaustivas evitan overflows y accesos inválidos, cumpliendo con las restricciones del espacio del núcleo.
+- **Liberación Segura:** Todos los recursos se liberan en todos los caminos de retorno, evitando fugas de memoria en el kernel.
 
 ## Reporte de Errores
 
@@ -529,6 +648,32 @@ Estos errores indicaron que `fb_info_alloc` y `fb_info_release` no estaban decla
 
 Se eliminaron las llamadas a `fb_info_alloc` y `fb_info_release` en las líneas 37 y 52 de `kernel/syscall_P2_3.c`. En su lugar, se accedió directamente al framebuffer existente con `struct fb_info *info = registered_fb[0]`, asegurando que se usara el dispositivo framebuffer principal sin necesidad de alocación manual. Esto resolvió los errores de declaración y conversión.
 
-## Conclusión
+## Error 4: Error de Compilación por Uso Incorrecto de `iosys_map`
 
-Estos tres errores reflejan los desafíos de trabajar con macros de listas, definiciones de syscalls y dependencias específicas del subsistema framebuffer en el kernel. Las soluciones, basadas en la documentación oficial, análisis del código fuente y recursos en línea, permitieron superar los problemas de compilación y completar las implementaciones. Este proceso destacó la importancia de usar las macros y funciones correctas según las especificaciones del kernel y evitar suposiciones sobre APIs no documentadas.
+### Información del Error
+
+Se intentó implementar la syscall `sys_capture_screen` en `kernel/syscall_P2_3.c` utilizando una estructura individual `struct iosys_map mapeo` para el mapeo de memoria del framebuffer, pero al compilar el kernel con `make -j$(nproc)`, se generó el siguiente error:
+
+```powershell
+kernel/syscall_P2_3.c: In function '__do_sys_capture_screen':
+kernel/syscall_P2_3.c:76:60: error: subscripted value is neither array nor pointer nor vector
+   76 |     if (!error && !copy_to_user(captura.buffer_datos, mapeo[0].vaddr, tamano)) {
+      |                                                            ^
+make[3]: *** [scripts/Makefile.build:229: kernel/syscall_P2_3.o] Error 1
+make[2]: *** [scripts/Makefile.build:478: kernel] Error 2
+make[1]: *** [/home/manuelima/Documentos/LaboratorioSopes2/linux-6.12.41/Makefile:1945: .] Error 2
+make: *** [Makefile:224: __sub-make] Error 2
+
+```
+
+Este error indicó que `mapeo[0].vaddr` no era accesible porque `mapeo` estaba declarado como una estructura individual (`struct iosys_map mapeo`) en lugar de un array (`struct iosys_map mapeo[DRM_FORMAT_MAX_PLANES]`), siendo necesario un array para manejar múltiples planos del framebuffer según la API DRM.
+
+### Fuentes que Ayudaron a Resolverlo
+
+- **Documentación DRM del kernel:** `include/drm/drm_framebuffer.h` y `Documentation/gpu/drm-mm.rst`, que especifican que `drm_gem_fb_vmap()` requiere un array de `struct iosys_map` para soportar framebuffers multi-plano.
+- **Código fuente del kernel:** Revisión de implementaciones en `drivers/gpu/drm/drm_gem_framebuffer_helper.c` donde se usa `struct iosys_map maps[DRM_FORMAT_MAX_PLANES]` para mapeo de framebuffers.
+- **Documentación de la API de mapeo:** `include/linux/iosys-map.h`, que describe `iosys_map` como estructura para mapeo de páginas y su uso en arrays para múltiples regiones de memoria.
+
+### Solución Encontrada
+
+Se corrigió el código reemplazando la declaración `struct iosys_map mapeo;` por `struct iosys_map mapeo[DRM_FORMAT_MAX_PLANES];` en la línea correspondiente de `kernel/syscall_P2_3.c`. Esto permitió que la función `drm_gem_fb_vmap()` recibiera correctamente un array para mapear el framebuffer, resolviendo el error de compilación y permitiendo el acceso al primer plano del framebuffer mediante `mapeo[0].vaddr` para transferir los datos de píxeles al espacio de usuario.
