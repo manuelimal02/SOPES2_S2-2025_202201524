@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
-import { ChefHat, Eye, EyeOff, User, Lock, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Monitor, Eye, EyeOff, User, Lock, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
-const API_URL = `http://`;
+//import axios from 'axios';
 
 const esquemaValidacion = yup.object({
     nombreUsuario: yup
@@ -39,8 +38,19 @@ export default function Login() {
 
     const alEnviar = async (datos) => {
         setCargando(true);
+
+        Swal.fire({
+            icon: 'success',
+            title: 'Bienvenido A USACLinux',
+            text: 'Inicio De Sesión Exitoso.',
+            confirmButtonColor: '#059669' // emerald-600
+        });
+        localStorage.setItem('usuario', JSON.stringify("Usuario Demo"));
+        localStorage.setItem('grupo', JSON.stringify("remote_control"));
+        navigate('/dashboard');
+        /*
         try {
-            const respuesta = await axios.post(API_URL + "/iniciar-sesion", {
+            const respuesta = await axios.post( "/iniciar-sesion", {
                 nombre_usuario: datos.nombreUsuario,
                 contrasena: datos.contrasena
             });
@@ -48,9 +58,9 @@ export default function Login() {
             if (respuesta.data.success) {
                 Swal.fire({
                     icon: 'success',
-                    title: 'Bienvenido A RecipeBoxCloud',
+                    title: 'Bienvenido A USACLinux',
                     text: 'Inicio De Sesión Exitoso.',
-                    confirmButtonColor: '#1d4ed8'
+                    confirmButtonColor: '#059669' // emerald-600
                 });
                 console.log(respuesta.data.datos_usuario);
                 localStorage.setItem('usuario', JSON.stringify(respuesta.data.datos_usuario));
@@ -63,19 +73,19 @@ export default function Login() {
                     icon: 'error',
                     title: 'Error Al Iniciar Sesión',
                     text: error.response.data.mensaje,
-                    confirmButtonColor: '#d81d1dff'
+                    confirmButtonColor: '#dc2626' // red-600
                 });
             } else {
                 Swal.fire({
                     icon: 'error',
                     title: 'Error de Conexión',
                     text: 'No se pudo conectar al servidor',
-                    confirmButtonColor: '#d81d1dff'
+                    confirmButtonColor: '#dc2626' // red-600
                 });
             }
         } finally {
             setCargando(false);
-        }
+        }*/
     };
 
     const obtenerEstadoCampo = (nombreCampo) => {
@@ -87,38 +97,29 @@ export default function Login() {
         return 'normal';
     };
 
-    const manejarRecuperarContrasena = () => {
-        Swal.fire({
-            icon: 'info',
-            title: 'Recuperar Contraseña',
-            text: 'Contáctate con el soporte para recuperar tu contraseña.',
-            confirmButtonColor: '#1d4ed8'
-        });
-    };
-
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-zinc-100 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8 transform transition-all duration-300 hover:shadow-2xl">
                 
                 {/* Header con logo y título */}
                 <div className="text-center mb-8">
-                    <div className="bg-slate-900 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
-                        <ChefHat className="w-10 h-10 text-white" />
+                    <div className="bg-emerald-900 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-emerald-900/30">
+                        <Monitor className="w-10 h-10 text-white" />
                     </div>
-                    <h1 className="text-3xl font-bold text-slate-900">RecipeBoxCloud</h1>
-                    <p className="text-slate-600 mt-2">Inicia Sesión En Tu Cuenta</p>
+                    <h1 className="text-3xl font-bold text-zinc-900">USACLinux</h1>
+                    <p className="text-zinc-600 mt-2">Escritorio Remoto Web</p>
                 </div>
 
                 <form onSubmit={handleSubmit(alEnviar)} className="space-y-6">
                     {/* Campo Nombre de Usuario */}
                     <div className="relative">
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        <label className="block text-sm font-semibold text-zinc-700 mb-2">
                             Nombre De Usuario
                         </label>
                         <div className="relative">
                             <User className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors z-10 ${
                                 obtenerEstadoCampo('nombreUsuario') === 'error' ? 'text-red-400' :
-                                obtenerEstadoCampo('nombreUsuario') === 'valido' ? 'text-blue-600' : 'text-slate-400'
+                                obtenerEstadoCampo('nombreUsuario') === 'valido' ? 'text-emerald-600' : 'text-zinc-400'
                             }`} />
                             <input
                                 type="text"
@@ -128,12 +129,12 @@ export default function Login() {
                                     obtenerEstadoCampo('nombreUsuario') === 'error'
                                         ? 'border-red-300 focus:border-red-500 bg-red-50'
                                         : obtenerEstadoCampo('nombreUsuario') === 'valido'
-                                        ? 'border-blue-300 focus:border-blue-500 bg-blue-50'
-                                        : 'border-slate-200 focus:border-blue-500 hover:border-slate-500'
+                                        ? 'border-emerald-300 focus:border-emerald-500 bg-emerald-50'
+                                        : 'border-zinc-200 focus:border-emerald-500 hover:border-emerald-500'
                                 } focus:outline-none transform hover:scale-[1.02] focus:scale-[1.02]`}
                             />
                             {obtenerEstadoCampo('nombreUsuario') === 'valido' && (
-                                <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-blue-600 z-20" />
+                                <CheckCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-emerald-600 z-20" />
                             )}
                             {obtenerEstadoCampo('nombreUsuario') === 'error' && (
                                 <AlertCircle className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-red-500 z-20" />
@@ -149,13 +150,13 @@ export default function Login() {
 
                     {/* Campo Contraseña */}
                     <div className="relative">
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        <label className="block text-sm font-semibold text-zinc-700 mb-2">
                             Contraseña
                         </label>
                         <div className="relative">
                             <Lock className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 transition-colors z-10 ${
                                 obtenerEstadoCampo('contrasena') === 'error' ? 'text-red-400' :
-                                obtenerEstadoCampo('contrasena') === 'valido' ? 'text-blue-600' : 'text-slate-400'
+                                obtenerEstadoCampo('contrasena') === 'valido' ? 'text-emerald-600' : 'text-zinc-400'
                             }`} />
                             <input
                                 type={mostrarContrasena ? 'text' : 'password'}
@@ -165,14 +166,14 @@ export default function Login() {
                                     obtenerEstadoCampo('contrasena') === 'error'
                                         ? 'border-red-300 focus:border-red-500 bg-red-50'
                                         : obtenerEstadoCampo('contrasena') === 'valido'
-                                        ? 'border-blue-300 focus:border-blue-500 bg-blue-50'
-                                        : 'border-slate-200 focus:border-blue-500 hover:border-slate-500'
+                                        ? 'border-emerald-300 focus:border-emerald-500 bg-emerald-50'
+                                        : 'border-zinc-200 focus:border-emerald-500 hover:border-emerald-500'
                                 } focus:outline-none transform hover:scale-[1.02] focus:scale-[1.02]`}
                             />
                             <button
                                 type="button"
                                 onClick={() => setMostrarContrasena(!mostrarContrasena)}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors z-30"
+                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-zinc-400 hover:text-zinc-600 transition-colors z-30"
                             >
                                 {mostrarContrasena ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </button>
@@ -185,25 +186,14 @@ export default function Login() {
                         )}
                     </div>
 
-                    {/* Opciones adicionales */}
-                    <div className="flex items-center justify-between">
-                        <button
-                            type="button"
-                            onClick={manejarRecuperarContrasena}
-                            className="text-sm text-blue-700 hover:text-blue-800 hover:underline transition-colors"
-                        >
-                            ¿Olvidaste Tu Contraseña?
-                        </button>
-                    </div>
-
                     {/* Botón de inicio de sesión */}
                     <button
                         type="submit"
                         disabled={cargando || !isValid}
                         className={`w-full py-4 rounded-xl font-bold text-lg transition-all duration-300 transform flex items-center justify-center ${
                             cargando || !isValid
-                                ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
-                                : 'bg-slate-900 text-white hover:bg-slate-800 hover:scale-[1.02] shadow-lg hover:shadow-xl'
+                                ? 'bg-zinc-300 text-zinc-500 cursor-not-allowed'
+                                : 'bg-emerald-900 text-white hover:bg-emerald-800 hover:scale-[1.02] shadow-lg shadow-emerald-900/30 hover:shadow-xl hover:shadow-emerald-900/40'
                         }`}
                     >
                         {cargando ? (
@@ -218,27 +208,6 @@ export default function Login() {
                             </>
                         )}
                     </button>
-
-                    {/* Separador */}
-                    <div className="flex items-center my-6">
-                        <div className="flex-1 border-t border-slate-200"></div>
-                        <span className="px-4 text-sm text-slate-500 bg-white">o</span>
-                        <div className="flex-1 border-t border-slate-200"></div>
-                    </div>
-
-                    {/* Link a registro */}
-                    <div className="text-center">
-                        <p className="text-slate-600">
-                            ¿No Tienes Cuenta?{' '}
-                            <button
-                                type="button"
-                                className="text-blue-700 hover:text-blue-800 font-bold transition-colors hover:underline"
-                                onClick={() => navigate('/registro')}
-                            >
-                                Regístrate Aquí
-                            </button>
-                        </p>
-                    </div>
                 </form>
             </div>
         </div>

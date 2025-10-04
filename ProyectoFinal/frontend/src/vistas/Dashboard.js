@@ -1,5 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Cpu, HardDrive, LogOut, User, Eye, Shield, Activity, Mouse, Keyboard, Monitor } from 'lucide-react';
+import Swal from 'sweetalert2';
+import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 export default function Dashboard() {
     const [usoCpu, setUsoCpu] = useState(0);
@@ -7,19 +10,35 @@ export default function Dashboard() {
     const [usoRam, setUsoRam] = useState(0);
     const [ramNoUsada, setRamNoUsada] = useState(0);
     const [nombreUsuario, setNombreUsuario] = useState('Usuario');
-    const [grupoUsuario, setGrupoUsuario] = useState('remote_control');
+    const [grupoUsuario, setGrupoUsuario] = useState('view_only');
     const [error, setError] = useState(null);
     const [imagenPantalla, setImagenPantalla] = useState(null);
     const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
     const [resolucion, setResolucion] = useState({ ancho: 1920, alto: 1080 });
+    const navigate = useNavigate();
 
+    // Obtener datos del usuario desde localStorage
     useEffect(() => {
-        const datosUsuario = {
-            usuario: 'Usuario Demo',
-            grupo: 'remote_control' // Cambia a 'view_only' para probar sin control
-        };
-        setNombreUsuario(datosUsuario.usuario);
-        setGrupoUsuario(datosUsuario.grupo);
+        const usuarioGuardado = localStorage.getItem('usuario');
+        const grupoGuardado = localStorage.getItem('grupo');
+        
+        if (usuarioGuardado) {
+            try {
+                const datosUsuario = JSON.parse(usuarioGuardado);
+                setNombreUsuario(datosUsuario);
+            } catch {
+                setNombreUsuario('Usuario Demo');
+            }
+        }
+        
+        if (grupoGuardado) {
+            try {
+                const grupo = JSON.parse(grupoGuardado);
+                setGrupoUsuario(grupo);
+            } catch {
+                setGrupoUsuario('view_only');
+            }
+        }
     }, []);
 
     async function ppmToPng(blob) {
@@ -55,13 +74,13 @@ export default function Dashboard() {
         return URL.createObjectURL(pngBlob);
     }
 
+    // Obtener resolución con axios
     useEffect(() => {
         const obtenerResolucion = async () => {
             try {
-                const respuesta = await fetch('http://localhost:8081/resolucion');
-                const datos = await respuesta.json();
-                if (!datos.error) {
-                    setResolucion({ ancho: datos.ancho, alto: datos.alto });
+                const { data } = await axios.get('http://localhost:8081/resolucion');
+                if (!data.error) {
+                    setResolucion({ ancho: data.ancho, alto: data.alto });
                 }
             } catch (err) {
                 console.error('Error al obtener resolución:', err);
@@ -72,18 +91,16 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
+    // Obtener pantalla con axios
     useEffect(() => {
         const obtenerPantalla = async () => {
             try {
-                const respuesta = await fetch('http://localhost:8081/pantalla');
-                if (respuesta.ok) {
-                    const blob = await respuesta.blob();
-                    const urlImagen = await ppmToPng(blob);
-                    setImagenPantalla(urlImagen);
-                    setUltimaActualizacion(new Date().toLocaleTimeString());
-                } else {
-                    console.error('Error al obtener pantalla:', respuesta.status);
-                }
+                const respuesta = await axios.get('http://localhost:8081/pantalla', {
+                    responseType: 'blob'
+                });
+                const urlImagen = await ppmToPng(respuesta.data);
+                setImagenPantalla(urlImagen);
+                setUltimaActualizacion(new Date().toLocaleTimeString());
             } catch (err) {
                 console.error('Error al obtener pantalla:', err);
             }
@@ -93,16 +110,16 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
+    // Obtener CPU con axios
     useEffect(() => {
         const obtenerDatosCpu = async () => {
             try {
-                const respuesta = await fetch('http://localhost:8081/cpu');
-                const datos = await respuesta.json();
-                if (datos.error) {
-                    setError(datos.error);
+                const { data } = await axios.get('http://localhost:8081/cpu');
+                if (data.error) {
+                    setError(data.error);
                 } else {
-                    setUsoCpu(datos.porcentaje_usado);
-                    setCpuNoUsado(datos.porcentaje_no_usado);
+                    setUsoCpu(data.porcentaje_usado);
+                    setCpuNoUsado(data.porcentaje_no_usado);
                     setError(null);
                 }
             } catch (err) {
@@ -115,16 +132,16 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
+    // Obtener RAM con axios
     useEffect(() => {
         const obtenerDatosRam = async () => {
             try { 
-                const respuesta = await fetch('http://localhost:8081/ram');
-                const datos = await respuesta.json();
-                if (datos.error) {
-                    setError(datos.error);
+                const { data } = await axios.get('http://localhost:8081/ram');
+                if (data.error) {
+                    setError(data.error);
                 } else {
-                    setUsoRam(datos.porcentaje_usado);
-                    setRamNoUsada(datos.porcentaje_no_usado);
+                    setUsoRam(data.porcentaje_usado);
+                    setRamNoUsada(data.porcentaje_no_usado);
                     setError(null);
                 }
             } catch (err) {
@@ -138,7 +155,30 @@ export default function Dashboard() {
     }, []);
 
     const manejarCerrarSesion = () => {
-        alert('Sesión cerrada');
+        Swal.fire({
+            title: '¿Cerrar sesión?',
+            text: 'Tu sesión actual se cerrará.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#059669',
+            cancelButtonColor: '#dc2626',
+            confirmButtonText: 'Cerrar Sesión',
+            cancelButtonText: 'Cancelar',
+        }).then((result) => {
+            if (result.isConfirmed) {
+                localStorage.removeItem('usuario');
+                localStorage.removeItem('grupo');
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Sesión Cerrada',
+                    text: 'Has cerrado sesión correctamente.',
+                    confirmButtonColor: '#059669',
+                    timer: 1500,
+                    showConfirmButton: false,
+                });
+                navigate('/');
+            }
+        });
     };
 
     const manejarClickPantalla = (e) => {
@@ -147,98 +187,102 @@ export default function Dashboard() {
             const x = ((e.clientX - rect.left) / rect.width) * 100;
             const y = ((e.clientY - rect.top) / rect.height) * 100;
             console.log(`Click en pantalla: ${x.toFixed(2)}%, ${y.toFixed(2)}%`);
-            // Aquí puedes enviar las coordenadas al backend
+            // Aquí puedes enviar las coordenadas al backend con axios
         }
     };
+
     const tieneControlTotal = grupoUsuario === 'remote_control';
+
     return (
-        <div className="min-h-screen bg-slate-50">
+        <div className="min-h-screen bg-zinc-50">
         
-            {/* ========== HEADER ========== */}
-            <header className="bg-white border-b border-slate-200 shadow-sm">
+            {/* ========== HEADER MEJORADO ========== */}
+            <header className="bg-white border-b border-zinc-200 shadow-sm">
                 <div className="max-w-7xl mx-auto px-6 py-4">
                 
-                    {/* Fila única con todo */}
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center gap-8">
                         
-                        {/* Logo */}
-                        <div className="flex items-center gap-3">
-                            <div className="bg-slate-900 p-2 rounded-lg">
+                        {/* Logo y Título */}
+                        <div className="flex items-center gap-3 min-w-[200px]">
+                            <div className="bg-emerald-900 p-2.5 rounded-lg shadow-lg shadow-emerald-900/30">
                                 <Shield className="w-6 h-6 text-white" />
                             </div>
                             <div>
-                                <h1 className="text-xl font-bold text-slate-900">USACLinux</h1>
-                                <p className="text-xs text-slate-500">Escritorio Remoto</p>
+                                <h1 className="text-xl font-bold text-zinc-900">USACLinux</h1>
+                                <p className="text-xs text-zinc-500">Escritorio Remoto</p>
                             </div>
                         </div>
 
-                        {/* Métricas CPU y RAM */}
-                        <div className="flex items-center gap-6">
+                        {/* Métricas Centrales - CPU y RAM */}
+                        <div className="flex items-center gap-4 flex-1 justify-center">
                             
                             {/* CPU */}
-                            <div className="flex items-center gap-3 bg-blue-50 px-4 py-2 rounded-lg border border-blue-200">
-                                <div className="bg-blue-700 p-2 rounded-lg">
+                            <div className="flex items-center gap-3 bg-emerald-50 px-5 py-3 rounded-xl border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
+                                <div className="bg-emerald-700 p-2.5 rounded-lg shadow-md">
                                     <Cpu className="w-5 h-5 text-white" />
                                 </div>
                                 <div>
-                                    <div className="text-xs text-slate-600 mb-1">CPU</div>
-                                    <div className="flex items-center gap-3">
+                                    <div className="text-xs font-medium text-zinc-600 mb-1.5">CPU</div>
+                                    <div className="flex items-baseline gap-3">
                                         <div className="text-center">
-                                            <div className="text-lg font-bold text-slate-900">{usoCpu}%</div>
-                                            <div className="text-xs text-slate-500">Usado</div>
+                                            <div className="text-xl font-bold text-zinc-900">{usoCpu}%</div>
+                                            <div className="text-xs text-zinc-500">Usado</div>
                                         </div>
-                                        <div className="w-px h-8 bg-slate-300"></div>
+                                        <div className="w-px h-10 bg-zinc-300"></div>
                                         <div className="text-center">
-                                            <div className="text-lg font-bold text-emerald-600">{cpuNoUsado}%</div>
-                                            <div className="text-xs text-slate-500">Libre</div>
+                                            <div className="text-xl font-bold text-emerald-600">{cpuNoUsado}%</div>
+                                            <div className="text-xs text-zinc-500">Libre</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
                             {/* RAM */}
-                            <div className="flex items-center gap-3 bg-purple-50 px-4 py-2 rounded-lg border border-purple-200">
-                                <div className="bg-purple-700 p-2 rounded-lg">
+                            <div className="flex items-center gap-3 bg-emerald-50 px-5 py-3 rounded-xl border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
+                                <div className="bg-emerald-700 p-2.5 rounded-lg shadow-md">
                                     <HardDrive className="w-5 h-5 text-white" />
                                 </div>
                                 <div>
-                                    <div className="text-xs text-slate-600 mb-1">RAM</div>
-                                    <div className="flex items-center gap-3">
+                                    <div className="text-xs font-medium text-zinc-600 mb-1.5">RAM</div>
+                                    <div className="flex items-baseline gap-3">
                                         <div className="text-center">
-                                            <div className="text-lg font-bold text-slate-900">{usoRam}%</div>
-                                            <div className="text-xs text-slate-500">Usado</div>
+                                            <div className="text-xl font-bold text-zinc-900">{usoRam}%</div>
+                                            <div className="text-xs text-zinc-500">Usado</div>
                                         </div>
-                                        <div className="w-px h-8 bg-slate-300"></div>
+                                        <div className="w-px h-10 bg-zinc-300"></div>
                                         <div className="text-center">
-                                            <div className="text-lg font-bold text-emerald-600">{ramNoUsada}%</div>
-                                            <div className="text-xs text-slate-500">Libre</div>
+                                            <div className="text-xl font-bold text-emerald-600">{ramNoUsada}%</div>
+                                            <div className="text-xs text-zinc-500">Libre</div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        {/* Usuario y Logout */}
-                        <div className="flex items-center gap-4">
-                            {/* Última actualización */}
+                        {/* Sección Derecha - Usuario y Acciones */}
+                        <div className="flex items-center gap-3 min-w-[300px] justify-end">
+                            
+                            {/* Última Actualización */}
                             {ultimaActualizacion && (
-                                <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-lg border border-slate-200">
-                                    <Activity className="w-4 h-4 text-slate-600" />
+                                <div className="flex items-center gap-2 bg-zinc-100 px-3 py-2 rounded-lg border border-zinc-200">
+                                    <Activity className="w-4 h-4 text-emerald-600" />
                                     <div>
-                                        <div className="text-xs text-slate-500">Última actualización</div>
-                                        <div className="text-sm font-semibold text-slate-900">{ultimaActualizacion}</div>
+                                        <div className="text-xs text-zinc-500">Actualizado</div>
+                                        <div className="text-sm font-semibold text-zinc-900">{ultimaActualizacion}</div>
                                     </div>
                                 </div>
                             )}
 
-                            <div className="flex items-center gap-2 bg-slate-100 px-4 py-2 rounded-lg border border-slate-200">
-                                <User className="w-4 h-4 text-slate-600" />
-                                <span className="font-semibold text-slate-900">{nombreUsuario}</span>
+                            {/* Usuario */}
+                            <div className="flex items-center gap-2 bg-zinc-100 px-4 py-2 rounded-lg border border-zinc-200">
+                                <User className="w-4 h-4 text-zinc-600" />
+                                <span className="font-semibold text-zinc-900">{nombreUsuario}</span>
                             </div>
 
+                            {/* Botón Cerrar Sesión */}
                             <button 
                                 onClick={manejarCerrarSesion}
-                                className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg transition-colors"
+                                className="flex items-center gap-2 bg-emerald-900 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg hover:shadow-emerald-900/30"
                             >
                                 <LogOut className="w-4 h-4" />
                                 <span className="font-semibold">Salir</span>
@@ -246,7 +290,7 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Mensaje de error si existe */}
+                    {/* Mensaje de error */}
                     {error && (
                         <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
                             <p className="text-sm text-red-700">⚠️ {error}</p>
@@ -259,21 +303,21 @@ export default function Dashboard() {
             <main className="max-w-7xl mx-auto px-6 py-6">
                 
                 {/* Escritorio Remoto */}
-                <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden">
+                <div className="bg-white rounded-xl shadow-lg border border-zinc-200 overflow-hidden">
                 
                     {/* Título */}
-                    <div className="bg-slate-900 px-6 py-4 flex justify-between items-center">
+                    <div className="bg-emerald-900 px-6 py-4 flex justify-between items-center">
                         <h2 className="text-lg font-bold text-white">Escritorio Remoto</h2>
                         <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                            <span className="text-sm text-slate-300">Activo</span>
+                            <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+                            <span className="text-sm text-emerald-100">Activo</span>
                         </div>
                     </div>
 
                     {/* Área de la imagen del escritorio */}
-                    <div className="bg-slate-900 p-6 flex justify-center items-center">
+                    <div className="bg-zinc-900 p-6 flex justify-center items-center">
                         <div 
-                            className={`bg-slate-800 rounded-lg overflow-hidden border-2 border-slate-700 relative ${tieneControlTotal ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                            className={`bg-zinc-800 rounded-lg overflow-hidden border-2 border-zinc-700 relative ${tieneControlTotal ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
                             style={{ 
                                 maxWidth: '100%',
                                 maxHeight: '70vh',
@@ -290,16 +334,16 @@ export default function Dashboard() {
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
                                     <div className="text-center">
-                                        <Activity className="w-12 h-12 text-slate-600 mx-auto mb-2 animate-pulse" />
-                                        <p className="text-slate-400">Cargando escritorio...</p>
+                                        <Activity className="w-12 h-12 text-zinc-600 mx-auto mb-2 animate-pulse" />
+                                        <p className="text-zinc-400">Cargando escritorio...</p>
                                     </div>
                                 </div>
                             )}
                             
                             {/* Overlay cuando no tiene control */}
                             {!tieneControlTotal && (
-                                <div className="absolute inset-0 bg-slate-900 bg-opacity-30 flex items-center justify-center pointer-events-none">
-                                    <div className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2">
+                                <div className="absolute inset-0 bg-zinc-900 bg-opacity-30 flex items-center justify-center pointer-events-none">
+                                    <div className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg">
                                         <Eye className="w-5 h-5" />
                                         <span className="font-semibold">Solo Vista</span>
                                     </div>
@@ -309,27 +353,27 @@ export default function Dashboard() {
                     </div>
 
                     {/* Footer con permisos */}
-                    <div className={`px-6 py-4 ${tieneControlTotal ? 'bg-emerald-50 border-t border-emerald-200' : 'bg-blue-50 border-t border-blue-200'}`}>
+                    <div className={`px-6 py-4 ${tieneControlTotal ? 'bg-emerald-50 border-t border-emerald-200' : 'bg-zinc-100 border-t border-zinc-200'}`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 {tieneControlTotal ? (
                                     <>
-                                        <div className="bg-emerald-600 p-2 rounded-lg">
+                                        <div className="bg-emerald-600 p-2.5 rounded-lg shadow-md">
                                             <Shield className="w-5 h-5 text-white" />
                                         </div>
                                         <div>
-                                            <h3 className="font-semibold text-slate-900">Acceso Total</h3>
-                                            <p className="text-sm text-slate-600">Puedes ver y controlar el escritorio</p>
+                                            <h3 className="font-semibold text-zinc-900">Acceso Total</h3>
+                                            <p className="text-sm text-zinc-600">Puedes ver y controlar el escritorio</p>
                                         </div>
                                     </>
                                 ) : (
                                     <>
-                                        <div className="bg-blue-600 p-2 rounded-lg">
+                                        <div className="bg-zinc-600 p-2.5 rounded-lg shadow-md">
                                             <Eye className="w-5 h-5 text-white" />
                                         </div>
                                         <div>
-                                            <h3 className="font-semibold text-slate-900">Solo Vista</h3>
-                                            <p className="text-sm text-slate-600">Puedes ver el escritorio sin controlarlo</p>
+                                            <h3 className="font-semibold text-zinc-900">Solo Vista</h3>
+                                            <p className="text-sm text-zinc-600">Puedes ver el escritorio sin controlarlo</p>
                                         </div>
                                     </>
                                 )}
@@ -337,15 +381,15 @@ export default function Dashboard() {
 
                             {/* Iconos de permisos */}
                             <div className="flex gap-2">
-                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-slate-100 border-slate-300 text-slate-400'}`}>
+                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-zinc-100 border-zinc-300 text-zinc-400'}`}>
                                     <Mouse className="w-4 h-4" />
                                     <span className="text-sm font-semibold">Mouse</span>
                                 </div>
-                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-slate-100 border-slate-300 text-slate-400'}`}>
+                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-zinc-100 border-zinc-300 text-zinc-400'}`}>
                                     <Keyboard className="w-4 h-4" />
                                     <span className="text-sm font-semibold">Teclado</span>
                                 </div>
-                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-slate-100 border-slate-300 text-slate-400'}`}>
+                                <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-zinc-100 border-zinc-300 text-zinc-400'}`}>
                                     <Monitor className="w-4 h-4" />
                                     <span className="text-sm font-semibold">Pantalla</span>
                                 </div>
