@@ -17,7 +17,6 @@ export default function Dashboard() {
     const [resolucion, setResolucion] = useState({ ancho: 1920, alto: 1080 });
     const navigate = useNavigate();
 
-    // Obtener datos del usuario desde localStorage
     useEffect(() => {
         const usuarioGuardado = localStorage.getItem('usuario');
         const grupoGuardado = localStorage.getItem('grupo');
@@ -74,7 +73,6 @@ export default function Dashboard() {
         return URL.createObjectURL(pngBlob);
     }
 
-    // Obtener resolución con axios
     useEffect(() => {
         const obtenerResolucion = async () => {
             try {
@@ -91,7 +89,6 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
-    // Obtener pantalla con axios
     useEffect(() => {
         const obtenerPantalla = async () => {
             try {
@@ -110,7 +107,6 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
-    // Obtener CPU con axios
     useEffect(() => {
         const obtenerDatosCpu = async () => {
             try {
@@ -132,7 +128,6 @@ export default function Dashboard() {
         return () => clearInterval(intervalo);
     }, []);
 
-    // Obtener RAM con axios
     useEffect(() => {
         const obtenerDatosRam = async () => {
             try { 
@@ -181,13 +176,66 @@ export default function Dashboard() {
         });
     };
 
-    const manejarClickPantalla = (e) => {
+    const enviarClickMouse = async (x, y, button) => {
+        try {
+            const { data } = await axios.post('http://localhost:8081/control-mouse', {
+                x: Math.round(x),
+                y: Math.round(y),
+                button: button
+            }, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (data.error) {
+                console.error('Error en control-mouse:', data.error);
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: data.error,
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 2000
+                });
+            } else {
+                console.log('Click enviado exitosamente:', data);
+            }
+        } catch (err) {
+            console.error('Error al enviar click:', err);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error de Conexión',
+                text: 'No se pudo enviar el click al servidor',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 2000
+            });
+        }
+    };
+
+    const manejarMouseDown = (e) => {
+        if (!tieneControlTotal) return;
+        
+        e.preventDefault();
+        
+        const rect = e.currentTarget.getBoundingClientRect();
+        const xPorcentaje = ((e.clientX - rect.left) / rect.width) * 100;
+        const yPorcentaje = ((e.clientY - rect.top) / rect.height) * 100;
+        const xPixel = (xPorcentaje / 100) * resolucion.ancho;
+        const yPixel = (yPorcentaje / 100) * resolucion.alto;
+        const button = e.button === 2 ? 1 : 0;
+        
+        console.log(`Click: ${xPixel.toFixed(0)}x, ${yPixel.toFixed(0)}y, botón: ${button === 0 ? 'izquierdo' : 'derecho'}`);
+        
+        enviarClickMouse(xPixel, yPixel, button);
+    };
+
+    const manejarContextMenu = (e) => {
         if (tieneControlTotal) {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const y = ((e.clientY - rect.top) / rect.height) * 100;
-            console.log(`Click en pantalla: ${x.toFixed(2)}%, ${y.toFixed(2)}%`);
-            // Aquí puedes enviar las coordenadas al backend con axios
+            e.preventDefault();
         }
     };
 
@@ -195,14 +243,9 @@ export default function Dashboard() {
 
     return (
         <div className="min-h-screen bg-zinc-50">
-        
-            {/* ========== HEADER MEJORADO ========== */}
             <header className="bg-white border-b border-zinc-200 shadow-sm">
                 <div className="max-w-7xl mx-auto px-6 py-4">
-                
                     <div className="flex justify-between items-center gap-8">
-                        
-                        {/* Logo y Título */}
                         <div className="flex items-center gap-3 min-w-[200px]">
                             <div className="bg-emerald-900 p-2.5 rounded-lg shadow-lg shadow-emerald-900/30">
                                 <Shield className="w-6 h-6 text-white" />
@@ -213,10 +256,7 @@ export default function Dashboard() {
                             </div>
                         </div>
 
-                        {/* Métricas Centrales - CPU y RAM */}
                         <div className="flex items-center gap-4 flex-1 justify-center">
-                            
-                            {/* CPU */}
                             <div className="flex items-center gap-3 bg-emerald-50 px-5 py-3 rounded-xl border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
                                 <div className="bg-emerald-700 p-2.5 rounded-lg shadow-md">
                                     <Cpu className="w-5 h-5 text-white" />
@@ -237,7 +277,6 @@ export default function Dashboard() {
                                 </div>
                             </div>
 
-                            {/* RAM */}
                             <div className="flex items-center gap-3 bg-emerald-50 px-5 py-3 rounded-xl border border-emerald-200 shadow-sm hover:shadow-md transition-shadow">
                                 <div className="bg-emerald-700 p-2.5 rounded-lg shadow-md">
                                     <HardDrive className="w-5 h-5 text-white" />
@@ -259,10 +298,7 @@ export default function Dashboard() {
                             </div>
                         </div>
 
-                        {/* Sección Derecha - Usuario y Acciones */}
                         <div className="flex items-center gap-3 min-w-[300px] justify-end">
-                            
-                            {/* Última Actualización */}
                             {ultimaActualizacion && (
                                 <div className="flex items-center gap-2 bg-zinc-100 px-3 py-2 rounded-lg border border-zinc-200">
                                     <Activity className="w-4 h-4 text-emerald-600" />
@@ -273,13 +309,11 @@ export default function Dashboard() {
                                 </div>
                             )}
 
-                            {/* Usuario */}
                             <div className="flex items-center gap-2 bg-zinc-100 px-4 py-2 rounded-lg border border-zinc-200">
                                 <User className="w-4 h-4 text-zinc-600" />
                                 <span className="font-semibold text-zinc-900">{nombreUsuario}</span>
                             </div>
 
-                            {/* Botón Cerrar Sesión */}
                             <button 
                                 onClick={manejarCerrarSesion}
                                 className="flex items-center gap-2 bg-emerald-900 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg transition-all shadow-md hover:shadow-lg hover:shadow-emerald-900/30"
@@ -290,7 +324,6 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Mensaje de error */}
                     {error && (
                         <div className="mt-4 bg-red-50 border border-red-200 rounded-lg p-3">
                             <p className="text-sm text-red-700">⚠️ {error}</p>
@@ -299,13 +332,8 @@ export default function Dashboard() {
                 </div>
             </header>
 
-            {/* ========== CONTENIDO PRINCIPAL ========== */}
             <main className="max-w-7xl mx-auto px-6 py-6">
-                
-                {/* Escritorio Remoto */}
                 <div className="bg-white rounded-xl shadow-lg border border-zinc-200 overflow-hidden">
-                
-                    {/* Título */}
                     <div className="bg-emerald-900 px-6 py-4 flex justify-between items-center">
                         <h2 className="text-lg font-bold text-white">Escritorio Remoto</h2>
                         <div className="flex items-center gap-2">
@@ -314,7 +342,6 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Área de la imagen del escritorio */}
                     <div className="bg-zinc-900 p-6 flex justify-center items-center">
                         <div 
                             className={`bg-zinc-800 rounded-lg overflow-hidden border-2 border-zinc-700 relative ${tieneControlTotal ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
@@ -323,13 +350,15 @@ export default function Dashboard() {
                                 maxHeight: '70vh',
                                 aspectRatio: `${resolucion.ancho} / ${resolucion.alto}`
                             }}
-                            onClick={manejarClickPantalla}
+                            onMouseDown={manejarMouseDown}
+                            onContextMenu={manejarContextMenu}
                         >
                             {imagenPantalla ? (
                                 <img 
                                     src={imagenPantalla} 
                                     alt="Escritorio remoto"
                                     className="w-full h-full object-cover"
+                                    draggable={false}
                                 />
                             ) : (
                                 <div className="w-full h-full flex items-center justify-center">
@@ -340,7 +369,6 @@ export default function Dashboard() {
                                 </div>
                             )}
                             
-                            {/* Overlay cuando no tiene control */}
                             {!tieneControlTotal && (
                                 <div className="absolute inset-0 bg-zinc-900 bg-opacity-30 flex items-center justify-center pointer-events-none">
                                     <div className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 shadow-lg">
@@ -352,7 +380,6 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* Footer con permisos */}
                     <div className={`px-6 py-4 ${tieneControlTotal ? 'bg-emerald-50 border-t border-emerald-200' : 'bg-zinc-100 border-t border-zinc-200'}`}>
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -363,7 +390,7 @@ export default function Dashboard() {
                                         </div>
                                         <div>
                                             <h3 className="font-semibold text-zinc-900">Acceso Total</h3>
-                                            <p className="text-sm text-zinc-600">Puedes ver y controlar el escritorio</p>
+                                            <p className="text-sm text-zinc-600">Puedes ver y controlar el escritorio (clic izquierdo y derecho)</p>
                                         </div>
                                     </>
                                 ) : (
@@ -379,7 +406,6 @@ export default function Dashboard() {
                                 )}
                             </div>
 
-                            {/* Iconos de permisos */}
                             <div className="flex gap-2">
                                 <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${tieneControlTotal ? 'bg-white border-emerald-300 text-emerald-700' : 'bg-zinc-100 border-zinc-300 text-zinc-400'}`}>
                                     <Mouse className="w-4 h-4" />
