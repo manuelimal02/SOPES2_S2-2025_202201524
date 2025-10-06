@@ -438,3 +438,7 @@
 552 common ipc_channel_receive sys_ipc_channel_receive
 553 common start_log_watch sys_start_log_watch
 554 common stop_log_watch sys_stop_log_watch
+555 common capture_screen sys_capture_screen
+556 common cpu_percentage sys_cpu_percentage
+557 common ram_percentage sys_ram_percentage
+558 common control_mouse_click sys_control_mouse_click

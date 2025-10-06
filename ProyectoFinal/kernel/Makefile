@@ -12,7 +12,8 @@ obj-y     = fork.o exec_domain.o panic.o \
 	    notifier.o ksysfs.o cred.o reboot.o \
 	    async.o range.o smpboot.o ucount.o regset.o ksyms_common.o \
 		syscall_usac1.o syscall_usac2.o syscall_usac3.o \
-		syscall_P2_1.o syscall_P2_2.o
+		syscall_P2_1.o syscall_P2_2.o syscall_P2_3.o \
+		syscall_pf_1.o syscall_pf_2.o syscall_pf_3.o \
 
 obj-$(CONFIG_USERMODE_DRIVER) += usermode_driver.o
 obj-$(CONFIG_MULTIUSER) += groups.o
