@@ -14,13 +14,13 @@ export default function Dashboard() {
     const [error, setError] = useState(null);
     const [imagenPantalla, setImagenPantalla] = useState(null);
     const [ultimaActualizacion, setUltimaActualizacion] = useState(null);
+    const [ultimoInput, setUltimoInput] = useState(null);
     const [resolucion, setResolucion] = useState({ ancho: 1920, alto: 1080 });
     const navigate = useNavigate();
 
     useEffect(() => {
         const usuarioGuardado = localStorage.getItem('usuario');
         const grupoGuardado = localStorage.getItem('grupo');
-        
         if (usuarioGuardado) {
             try {
                 const datosUsuario = JSON.parse(usuarioGuardado);
@@ -29,7 +29,6 @@ export default function Dashboard() {
                 setNombreUsuario('Usuario Demo');
             }
         }
-        
         if (grupoGuardado) {
             try {
                 const grupo = JSON.parse(grupoGuardado);
@@ -40,37 +39,37 @@ export default function Dashboard() {
         }
     }, []);
 
-    async function ppmToPng(blob) {
-        const buffer = await blob.arrayBuffer();
-        const data = new Uint8Array(buffer);
-        const text = new TextDecoder().decode(data.slice(0, 64));
-        const headerMatch = text.match(/P6\s+(\d+)\s+(\d+)\s+255\s/);
+    async function ConvertirPPM_PNG(blob) {
+        const bufer = await blob.arrayBuffer();
+        const datos = new Uint8Array(bufer);
+        const texto = new TextDecoder().decode(datos.slice(0, 64));
+        const coincidenciaEncabezado = texto.match(/P6\s+(\d+)\s+(\d+)\s+255\s/);
 
-        if (!headerMatch) {
+        if (!coincidenciaEncabezado) {
             throw new Error("Formato PPM inválido");
         }
 
-        const width = parseInt(headerMatch[1]);
-        const height = parseInt(headerMatch[2]);
-        const headerEnd = text.indexOf('255') + 4;
-        const pixelData = data.slice(headerEnd);
+        const ancho = parseInt(coincidenciaEncabezado[1]);
+        const alto = parseInt(coincidenciaEncabezado[2]);
+        const finEncabezado = texto.indexOf('255') + 4;
+        const datosPixeles = datos.slice(finEncabezado);
 
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        const imgData = ctx.createImageData(width, height);
+        const lienzo = document.createElement('canvas');
+        lienzo.width = ancho;
+        lienzo.height = alto;
+        const contexto = lienzo.getContext('2d');
+        const datosImagen = contexto.createImageData(ancho, alto);
 
-        for (let i = 0, j = 0; i < pixelData.length; i += 3, j += 4) {
-            imgData.data[j] = pixelData[i];
-            imgData.data[j + 1] = pixelData[i+1];
-            imgData.data[j + 2] = pixelData[i+2];
-            imgData.data[j + 3] = 255;
+        for (let i = 0, j = 0; i < datosPixeles.length; i += 3, j += 4) {
+            datosImagen.data[j] = datosPixeles[i];
+            datosImagen.data[j + 1] = datosPixeles[i + 1];
+            datosImagen.data[j + 2] = datosPixeles[i + 2];
+            datosImagen.data[j + 3] = 255;
         }
-
-        ctx.putImageData(imgData, 0, 0);
-        const pngBlob = await new Promise(res => canvas.toBlob(res, 'image/png'));
-        return URL.createObjectURL(pngBlob);
+        
+        contexto.putImageData(datosImagen, 0, 0);
+        const blobPng = await new Promise(resolver => lienzo.toBlob(resolver, 'image/png'));
+        return URL.createObjectURL(blobPng);
     }
 
     useEffect(() => {
@@ -79,13 +78,15 @@ export default function Dashboard() {
                 const { data } = await axios.get('http://localhost:8081/resolucion');
                 if (!data.error) {
                     setResolucion({ ancho: data.ancho, alto: data.alto });
+                    setError(null);
                 }
             } catch (err) {
+                setError('No se pudo obtener la resolución');
                 console.error('Error al obtener resolución:', err);
             }
         };
         obtenerResolucion();
-        const intervalo = setInterval(obtenerResolucion, 20000);
+        const intervalo = setInterval(obtenerResolucion, 2000);
         return () => clearInterval(intervalo);
     }, []);
 
@@ -95,10 +96,12 @@ export default function Dashboard() {
                 const respuesta = await axios.get('http://localhost:8081/pantalla', {
                     responseType: 'blob'
                 });
-                const urlImagen = await ppmToPng(respuesta.data);
+                const urlImagen = await ConvertirPPM_PNG(respuesta.data);
                 setImagenPantalla(urlImagen);
                 setUltimaActualizacion(new Date().toLocaleTimeString());
+                setError(null);
             } catch (err) {
+                setError('No se pudo obtener la pantalla');
                 console.error('Error al obtener pantalla:', err);
             }
         };
@@ -176,12 +179,12 @@ export default function Dashboard() {
         });
     };
 
-    const enviarClickMouse = async (x, y, button) => {
+    const enviarClickMouse = async (x, y, boton) => {
         try {
-            const { data } = await axios.post('http://localhost:8081/control-mouse', {
+            const { data } = await axios.post('http://localhost:8081/mouse', {
                 x: Math.round(x),
                 y: Math.round(y),
-                button: button
+                boton: boton
             }, {
                 headers: {
                     'Content-Type': 'application/json'
@@ -189,18 +192,11 @@ export default function Dashboard() {
             });
             
             if (data.error) {
-                console.error('Error en control-mouse:', data.error);
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Error',
-                    text: data.error,
-                    toast: true,
-                    position: 'top-end',
-                    showConfirmButton: false,
-                    timer: 2000
-                });
+                console.error('Error en mouse:', data.error);
+                setError(data.error);
             } else {
                 console.log('Click enviado exitosamente:', data);
+                setError(null);
             }
         } catch (err) {
             console.error('Error al enviar click:', err);
@@ -216,10 +212,75 @@ export default function Dashboard() {
         }
     };
 
+    const enviarEventoTecla = async (codigo_tecla) => {
+        try {
+            const { data } = await axios.post('http://localhost:8081/teclado', {
+                codigo_tecla: codigo_tecla
+            }, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (data.error) {
+                console.error('Error en teclado:', data.error);
+                setError(data.error);
+            } else {
+                console.log('Tecla enviada:', data);
+                setError(null);
+            }
+        } catch (err) {
+            console.error('Error al enviar tecla:', err);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error de Conexión',
+                text: 'No se pudo enviar la tecla al servidor',
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 2000
+            });
+        }
+    };
+
+    const mapearTeclaALinux = (event) => {
+        const mapa = {
+            'Escape': 1, 'Digit1': 2, 'Digit2': 3, 'Digit3': 4, 'Digit4': 5,
+            'Digit5': 6, 'Digit6': 7, 'Digit7': 8, 'Digit8': 9, 'Digit9': 10,
+            'Digit0': 11, 'Minus': 12, 'Equal': 13, 'Backspace': 14,
+            'Tab': 15, 'KeyQ': 16, 'KeyW': 17, 'KeyE': 18, 'KeyR': 19,
+            'KeyT': 20, 'KeyY': 21, 'KeyU': 22, 'KeyI': 23, 'KeyO': 24,
+            'KeyP': 25, 'BracketLeft': 26, 'BracketRight': 27, 'Enter': 28,
+            'ControlLeft': 29, 'KeyA': 30, 'KeyS': 31, 'KeyD': 32, 'KeyF': 33,
+            'KeyG': 34, 'KeyH': 35, 'KeyJ': 36, 'KeyK': 37, 'KeyL': 38,
+            'Semicolon': 39, 'Quote': 40, 'Backquote': 41, 'ShiftLeft': 42,
+            'Backslash': 43, 'KeyZ': 44, 'KeyX': 45, 'KeyC': 46, 'KeyV': 47,
+            'KeyB': 48, 'KeyN': 49, 'KeyM': 50, 'Comma': 51, 'Period': 52,
+            'Slash': 53, 'ShiftRight': 54, 'NumpadMultiply': 55, 'AltLeft': 56,
+            'Space': 57, 'CapsLock': 58, 'F1': 59, 'F2': 60, 'F3': 61,
+            'F4': 62, 'F5': 63, 'F6': 64, 'F7': 65, 'F8': 66, 'F9': 67,
+            'F10': 68, 'NumLock': 69, 'ScrollLock': 70, 'Numpad7': 71,
+            'Numpad8': 72, 'Numpad9': 73, 'NumpadSubtract': 74, 'Numpad4': 75,
+            'Numpad5': 76, 'Numpad6': 77, 'NumpadAdd': 78, 'Numpad1': 79,
+            'Numpad2': 80, 'Numpad3': 81, 'Numpad0': 82, 'NumpadDecimal': 83,
+            'F11': 87, 'F12': 88, 'NumpadEnter': 96, 'ControlRight': 97,
+            'NumpadDivide': 98, 'PrintScreen': 99, 'AltRight': 100,
+            'Home': 102, 'ArrowUp': 103, 'PageUp': 104, 'ArrowLeft': 105,
+            'ArrowRight': 106, 'End': 107, 'ArrowDown': 108, 'PageDown': 109,
+            'Insert': 110, 'Delete': 111, 'MetaLeft': 125, 'MetaRight': 126
+        };
+        
+        return mapa[event.code] || -1;
+    };
+
     const manejarMouseDown = (e) => {
         if (!tieneControlTotal) return;
         
-        e.preventDefault();
+        setUltimoInput('mouse');
+        e.currentTarget.focus();
+        
+        if (e.button === 2) {
+            e.preventDefault();
+        }
         
         const rect = e.currentTarget.getBoundingClientRect();
         const xPorcentaje = ((e.clientX - rect.left) / rect.width) * 100;
@@ -229,8 +290,22 @@ export default function Dashboard() {
         const button = e.button === 2 ? 1 : 0;
         
         console.log(`Click: ${xPixel.toFixed(0)}x, ${yPixel.toFixed(0)}y, botón: ${button === 0 ? 'izquierdo' : 'derecho'}`);
-        
         enviarClickMouse(xPixel, yPixel, button);
+    };
+
+    const manejarTeclaPresionada = (e) => {
+        if (!tieneControlTotal) return;
+        
+        setUltimoInput('teclado');
+        e.preventDefault();
+        
+        const codigoLinux = mapearTeclaALinux(e);
+        if (codigoLinux !== -1) {
+            console.log(`Tecla presionada: ${e.key} (code: ${e.code}, linux: ${codigoLinux})`);
+            enviarEventoTecla(codigoLinux);
+        } else {
+            console.warn(`Tecla no mapeada: ${e.code}`);
+        }
     };
 
     const manejarContextMenu = (e) => {
@@ -344,15 +419,28 @@ export default function Dashboard() {
 
                     <div className="bg-zinc-900 p-6 flex justify-center items-center">
                         <div 
-                            className={`bg-zinc-800 rounded-lg overflow-hidden border-2 border-zinc-700 relative ${tieneControlTotal ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                            className={`bg-zinc-800 rounded-lg overflow-hidden border-2 relative transition-all ${
+                                tieneControlTotal 
+                                    ? `cursor-crosshair border-zinc-700 ${
+                                        ultimoInput === 'mouse' 
+                                            ? 'focus:border-blue-500 focus:shadow-lg focus:shadow-blue-500/50' 
+                                            : ultimoInput === 'teclado'
+                                            ? 'focus:border-purple-500 focus:shadow-lg focus:shadow-purple-500/50'
+                                            : 'focus:border-emerald-500 focus:shadow-lg focus:shadow-emerald-500/50'
+                                    }`
+                                    : 'cursor-not-allowed border-zinc-700'
+                            }`}
                             style={{ 
                                 maxWidth: '100%',
                                 maxHeight: '70vh',
-                                aspectRatio: `${resolucion.ancho} / ${resolucion.alto}`
+                                aspectRatio: `${resolucion.ancho} / ${resolucion.alto}`,
+                                outline: 'none'
                             }}
+                            tabIndex={0}
                             onMouseDown={manejarMouseDown}
                             onContextMenu={manejarContextMenu}
-                        >
+                            onKeyDown={manejarTeclaPresionada}
+                            >
                             {imagenPantalla ? (
                                 <img 
                                     src={imagenPantalla} 
@@ -390,7 +478,7 @@ export default function Dashboard() {
                                         </div>
                                         <div>
                                             <h3 className="font-semibold text-zinc-900">Acceso Total</h3>
-                                            <p className="text-sm text-zinc-600">Puedes ver y controlar el escritorio (clic izquierdo y derecho)</p>
+                                            <p className="text-sm text-zinc-600">Puedes ver y controlar el escritorio (clic izquierdo y derecho).</p>
                                         </div>
                                     </>
                                 ) : (
@@ -400,7 +488,7 @@ export default function Dashboard() {
                                         </div>
                                         <div>
                                             <h3 className="font-semibold text-zinc-900">Solo Vista</h3>
-                                            <p className="text-sm text-zinc-600">Puedes ver el escritorio sin controlarlo</p>
+                                            <p className="text-sm text-zinc-600">No tienes control del escritorio.</p>
                                         </div>
                                     </>
                                 )}
