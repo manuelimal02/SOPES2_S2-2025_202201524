@@ -418,93 +418,464 @@ SYSCALL_DEFINE3(control_mouse_click, int, pos_x_abs, int, pos_y_abs, int, tipo_c
 
 ## Implementación del Backend (API)
 
-La API desarrollada en C/C++ actúa como intermediaria entre la interfaz web y las llamadas al sistema del kernel, implementando autenticación PAM y control de acceso basado en grupos.
+La API desarrollada en C actúa como intermediaria entre la interfaz web y las llamadas al sistema del kernel, implementando autenticación PAM y control de acceso basado en grupos. Esta implementación se encuentra en el archivo principal del servidor y utiliza la biblioteca `libmicrohttpd` para gestionar peticiones HTTP.
 
 ### Arquitectura del Backend
 
-[DESCRIPCIÓN DE LA ARQUITECTURA]
+El backend sigue una arquitectura de servidor HTTP basada en eventos, donde cada petición es procesada por un manejador central que enruta las solicitudes a diferentes endpoints según la URL. La arquitectura se compone de:
+
+- **Servidor HTTP:** Implementado con `libmicrohttpd`, escuchando en el puerto 8081.
+- **Sistema de Autenticación:** Integración con PAM (Pluggable Authentication Modules) para validar credenciales de usuarios del sistema.
+- **Control de Acceso:** Verificación de pertenencia a grupos (`remote_view`, `remote_control`) mediante la API de grupos de Linux.
+- **Interfaz con Syscalls:** Invocación directa de las syscalls personalizadas mediante la función `syscall()`.
+- **Manejo CORS:** Configuración de headers para permitir peticiones cross-origin desde la aplicación web.
 
 ### Sistema de Autenticación con PAM
 
-[EXPLICACIÓN DE LA IMPLEMENTACIÓN PAM]
+La autenticación se implementa mediante la API PAM de Linux, proporcionando seguridad robusta al validar usuarios contra el sistema de autenticación nativo del sistema operativo.
 
-### Fragmento de Código Relevante
+#### Fragmento de Código Relevante
 
 ```c
-// [CÓDIGO DEL BACKEND]
+// FUNCIÓN CALLBACK CON PAM
+int conversacion_pam(int num_msg, const struct pam_message **msg, 
+                     struct pam_response **resp, void *appdata_ptr) {
+    char *usuario_contra = (char *)appdata_ptr;
+    char *contrasena = strchr(usuario_contra, ':');
+    if (!contrasena) return PAM_CONV_ERR;
+
+    *contrasena = '\0';
+    contrasena++;
+
+    *resp = calloc(num_msg, sizeof(struct pam_response));
+    if (!*resp) return PAM_CONV_ERR;
+
+    for (int i = 0; i < num_msg; i++) {
+        switch (msg[i]->msg_style) {
+            case PAM_PROMPT_ECHO_OFF:
+                (*resp)[i].resp = strdup(contrasena);
+                break;
+            case PAM_PROMPT_ECHO_ON:
+                (*resp)[i].resp = strdup(usuario_contra);
+                break;
+            default:
+                (*resp)[i].resp = NULL;
+                break;
+        }
+    }
+    return PAM_SUCCESS;
+}
+
+const char *verificar_grupo_usuario(const char *usuario) {
+    struct group *grupo;
+    gid_t *grupos = NULL;
+    int cantidad = 0;
+
+    if (getgrouplist(usuario, getgid(), NULL, &cantidad) == -1) {
+        grupos = malloc(cantidad * sizeof(gid_t));
+        if (getgrouplist(usuario, getgid(), grupos, &cantidad) != -1) {
+            for (int i = 0; i < cantidad; i++) {
+                grupo = getgrgid(grupos[i]);
+                if (grupo && (
+                    strcmp(grupo->gr_name, "remote_view") == 0 ||
+                    strcmp(grupo->gr_name, "remote_control") == 0)) {
+                    const char *nombre = strdup(grupo->gr_name);
+                    free(grupos);
+                    return nombre;
+                }
+            }
+        }
+        free(grupos);
+    }
+    return NULL;
+}
 ```
 
-### Explicación de la Implementación
+#### Explicación de la Implementación
 
 **Autenticación:**
 
-- **Propósito:** [EXPLICACIÓN]
-- **Funcionamiento:** [DETALLES]
+- **Propósito:** Validar las credenciales de usuario contra el sistema PAM y verificar su autorización mediante pertenencia a grupos.
+- **Funcionamiento:**
+    - **Función de Conversación PAM:** `conversacion_pam()` actúa como callback para la interacción con PAM. Recibe las credenciales en formato "usuario:contraseña" a través de `appdata_ptr`, las separa utilizando `strchr()` para encontrar el delimitador ':', y responde a los diferentes tipos de prompts de PAM (`PAM_PROMPT_ECHO_OFF` para contraseñas, `PAM_PROMPT_ECHO_ON` para nombres de usuario).
+    - **Inicio de Sesión PAM:** En el endpoint `/login`, se inicializa una sesión PAM con `pam_start()` usando el servicio "login", se ejecuta la autenticación con `pam_authenticate()`, y se valida la cuenta con `pam_acct_mgmt()`.
+    - **Verificación de Grupos:** Tras autenticación exitosa, `verificar_grupo_usuario()` obtiene la lista de grupos del usuario mediante `getgrouplist()`, itera sobre ellos con `getgrgid()` para obtener sus nombres, y verifica si pertenece a `remote_view` o `remote_control`.
+    - **Respuesta:** Si el usuario se autentica correctamente y pertenece a un grupo autorizado, retorna JSON con estado exitoso, nombre de usuario y grupo. En caso contrario, retorna mensajes de error apropiados.
 
 **Control de Acceso:**
 
-- **Propósito:** [EXPLICACIÓN]
-- **Funcionamiento:** [DETALLES]
+- **Propósito:** Garantizar que solo usuarios autorizados puedan acceder a funcionalidades del sistema según su grupo.
+- **Funcionamiento:**
+    - **Grupos Definidos:** 
+        - `remote_view`: Usuarios con permisos para visualizar el escritorio y monitorear recursos.
+        - `remote_control`: Usuarios con permisos completos, incluyendo control de mouse y teclado.
+    - **Validación:** La función `verificar_grupo_usuario()` implementa la lógica de verificación, retornando el nombre del primer grupo autorizado encontrado o NULL si el usuario no pertenece a ninguno.
+    - **Principio de Privilegio Mínimo:** La API verifica la pertenencia a grupos en cada endpoint sensible, asegurando que los usuarios solo puedan ejecutar acciones autorizadas.
 
-**Endpoints de la API:**
+### Endpoints de la API
 
-- [DESCRIPCIÓN DE ENDPOINTS]
+La API expone los siguientes endpoints para interactuar con el sistema:
+
+#### **GET /cpu**
+- **Propósito:** Obtener el porcentaje de uso de CPU.
+- **Implementación:** Invoca `syscall(SYS_CPU_PERCENTAGE, &info)` y retorna JSON con `porcentaje_usado` y `porcentaje_no_usado`.
+- **Respuesta:** `{"porcentaje_usado": 45, "porcentaje_no_usado": 55}`
+
+#### **GET /ram**
+- **Propósito:** Obtener el porcentaje de uso de memoria RAM.
+- **Implementación:** Invoca `syscall(SYS_RAM_PERCENTAGE, &info)` y retorna JSON con estadísticas de memoria.
+- **Respuesta:** `{"porcentaje_usado": 62, "porcentaje_no_usado": 38}`
+
+#### **GET /resolucion**
+- **Propósito:** Obtener la resolución de pantalla del sistema.
+- **Implementación:** Invoca `syscall(SYS_GET_SCREEN_RESOLUTION, &ancho, &alto)` y retorna las dimensiones.
+- **Respuesta:** `{"ancho": 1920, "alto": 1080}`
+
+#### **GET /pantalla**
+- **Propósito:** Capturar el escritorio actual y devolverlo como imagen PPM.
+- **Implementación:** 
+    - Obtiene la resolución con `SYS_GET_SCREEN_RESOLUTION`.
+    - Reserva buffer con `malloc()` del tamaño necesario (ancho × alto × 4 bytes).
+    - Invoca `syscall(SYS_CAPTURE_SCREEN, &captura)` para capturar el framebuffer.
+    - Convierte de BGRA (32-bit) a RGB (24-bit) en formato PPM con `convertir_a_ppm()`.
+    - Retorna la imagen con Content-Type: `image/x-portable-pixmap`.
+- **Respuesta:** Datos binarios en formato PPM.
+
+#### **POST /mouse**
+- **Propósito:** Controlar el mouse (movimiento y clicks).
+- **Payload JSON:** `{"x": 500, "y": 300, "boton": 0}` (0=izquierdo, 1=derecho)
+- **Implementación:** 
+    - Parsea el JSON recibido usando `strstr()` y `sscanf()`.
+    - Valida que las coordenadas y el botón estén dentro de rangos válidos.
+    - Invoca `syscall(SYS_CONTROL_MOUSE_CLICK, x, y, clic)`.
+- **Respuesta:** `{"estado": "exito", "x": 500, "y": 300, "boton": 0}`
+
+#### **POST /teclado**
+- **Propósito:** Enviar eventos de teclado.
+- **Payload JSON:** `{"codigo_tecla": 30}` (código de tecla según input.h)
+- **Implementación:** 
+    - Parsea el código de tecla del JSON.
+    - Valida que esté dentro del rango válido (0 a KEY_CNT).
+    - Invoca `syscall(SYS_SEND_KEY_EVENT, codigo_tecla)`.
+- **Respuesta:** `{"estado": "exito", "codigo_tecla": 30}`
+
+#### **POST /login**
+- **Propósito:** Autenticar usuario y verificar permisos.
+- **Payload JSON:** `{"usuario": "carlos", "contrasena": "password123"}`
+- **Implementación:** 
+    - Parsea credenciales del JSON.
+    - Inicializa sesión PAM y autentica mediante `pam_authenticate()`.
+    - Verifica pertenencia a grupos autorizados.
+    - Retorna información del usuario y grupo si es exitoso.
+- **Respuesta:** `{"estado": "exito", "usuario": "carlos", "grupo": "remote_control"}`
+
+### Fragmento de Código del Manejador Principal
+
+```c
+static enum MHD_Result manejar_solicitud(void *cls, struct MHD_Connection *conexion,
+                 const char *url, const char *metodo, const char *version,
+                 const char *datos_subidos, size_t *tamano_datos, void **ptr) {
+    struct MHD_Response *respuesta;
+    enum MHD_Result ret;
+    char buffer[512];
+
+    // Manejar OPTIONS (CORS preflight)
+    if (strcmp(metodo, "OPTIONS") == 0) {
+        respuesta = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+        agregar_encabezados_cors(respuesta);
+        ret = MHD_queue_response(conexion, MHD_HTTP_OK, respuesta);
+        MHD_destroy_response(respuesta);
+        return ret;
+    }
+
+    // Inicializar info de conexión para POST
+    struct info_conexion *info_con = *ptr;
+    if (!info_con) {
+        info_con = malloc(sizeof(struct info_conexion));
+        if (!info_con) return MHD_NO;
+        info_con->datos = NULL;
+        info_con->tamano = 0;
+        *ptr = info_con;
+        return MHD_YES;
+    }
+
+    // Procesar datos POST
+    if (strcmp(metodo, "POST") == 0 && *tamano_datos > 0) {
+        char *nuevo_dato = realloc(info_con->datos, info_con->tamano + *tamano_datos + 1);
+        if (!nuevo_dato) return MHD_NO;
+        info_con->datos = nuevo_dato;
+        memcpy(info_con->datos + info_con->tamano, datos_subidos, *tamano_datos);
+        info_con->tamano += *tamano_datos;
+        info_con->datos[info_con->tamano] = '\0';
+        *tamano_datos = 0;
+        return MHD_YES;
+    }
+}
+```
+
+### Manejo de CORS
+
+Para permitir que la aplicación web acceda a la API desde un dominio diferente, se implementó soporte completo de CORS:
+
+```c
+void agregar_encabezados_cors(struct MHD_Response *respuesta) {
+    MHD_add_response_header(respuesta, "Access-Control-Allow-Origin", "*");
+    MHD_add_response_header(respuesta, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    MHD_add_response_header(respuesta, "Access-Control-Allow-Headers", "Content-Type");
+}
+```
+
+- **Access-Control-Allow-Origin:** Permite peticiones desde cualquier origen (`*`).
+- **Preflight OPTIONS:** Maneja peticiones OPTIONS para validación CORS antes de las peticiones reales.
+- **Headers en Todas las Respuestas:** Se agregan headers CORS a cada respuesta HTTP.
+
+### Inicialización del Servidor
+
+```c
+int main() {
+    printf("===========================================\n");
+    printf("  USACLinux API - Servidor (PPM)\n");
+    printf("===========================================\n");
+    struct MHD_Daemon *daemon = MHD_start_daemon(
+        MHD_USE_SELECT_INTERNALLY,
+        PUERTO,
+        NULL, NULL,
+        &manejar_solicitud, NULL,
+        MHD_OPTION_NOTIFY_COMPLETED, solicitud_completada, NULL,
+        MHD_OPTION_END
+    );
+    
+    if (!daemon) {
+        fprintf(stderr, "[ERROR] No se pudo iniciar el servidor\n");
+        return 1;
+    }
+    printf("[OK] Servidor corriendo en http://localhost:%d\n", PUERTO);
+    printf("[INFO] Presiona ENTER para detener...\n");
+    getchar();
+    MHD_stop_daemon(daemon);
+    printf("\n[INFO] Servidor detenido\n");
+    return 0;
+}
+```
+
+- **MHD_USE_SELECT_INTERNALLY:** Configura el servidor para usar threading interno.
+- **solicitud_completada:** Callback para liberar recursos después de cada petición.
+- **Puerto 8081:** Puerto de escucha configurado mediante constante.
+
+### Consideraciones de Seguridad
+
+- **Validación de Entrada:** Todos los parámetros recibidos son validados antes de procesarse.
+- **Liberación de Memoria:** Se implementa cleanup automático mediante `solicitud_completada()` para prevenir fugas de memoria.
+- **Autenticación Obligatoria:** Los endpoints sensibles requieren autenticación PAM previa.
+- **Manejo de Errores:** Cada operación verifica errores y retorna mensajes descriptivos en JSON.
+
+## Compilación del Backend
+
+Para compilar y ejecutar el servidor de la API, se utilizó un `Makefile` que automatiza el proceso de construcción, facilitando la gestión de dependencias y la compilación del programa en C.
+
+### Makefile del Backend
+
+```makefile
+CC = gcc
+CFLAGS = -Wall -Wextra
+LIBS = -lmicrohttpd -lpam -lpam_misc
+
+TARGET = api_server
+SRC = main.c
+
+all: $(TARGET)
+
+$(TARGET): $(SRC)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SRC) $(LIBS)
+
+clean:
+	rm -f $(TARGET)
+
+run: $(TARGET)
+	./$(TARGET)
+```
+
+### Explicación del Makefile
+
+**Variables de Configuración:**
+
+- **`CC = gcc`**: Define el compilador a utilizar. En este caso, se usa GCC (GNU Compiler Collection), el compilador estándar para programas en C en sistemas Linux.
+
+- **`CFLAGS = -Wall -Wextra`**: Especifica las flags de compilación:
+  - `-Wall`: Habilita la mayoría de advertencias del compilador, ayudando a identificar código potencialmente problemático.
+  - `-Wextra`: Activa advertencias adicionales no incluidas en `-Wall`, proporcionando un nivel más estricto de verificación de código.
+
+- **`LIBS = -lmicrohttpd -lpam -lpam_misc`**: Define las bibliotecas necesarias para enlazar durante la compilación:
+  - `-lmicrohttpd`: Enlaza con la biblioteca GNU libmicrohttpd, que proporciona la funcionalidad del servidor HTTP embebido.
+  - `-lpam`: Enlaza con la biblioteca PAM (Pluggable Authentication Modules), necesaria para la autenticación de usuarios del sistema.
+  - `-lpam_misc`: Enlaza con las utilidades misceláneas de PAM, que incluyen funciones auxiliares para la conversación PAM.
+
+- **`TARGET = api_server`**: Define el nombre del archivo ejecutable final que se generará.
+
+- **`SRC = main.c`**: Especifica el archivo fuente principal que contiene el código del servidor.
+
+**Reglas del Makefile:**
+
+- **`all: $(TARGET)`**: Regla por defecto que se ejecuta cuando se invoca `make` sin argumentos. Depende de la regla `$(TARGET)`, lo que significa que compilará el programa.
+
+- **`$(TARGET): $(SRC)`**: Regla principal de compilación que:
+  - Tiene como dependencia el archivo `main.c`.
+  - Ejecuta el comando: `gcc -Wall -Wextra -o api_server main.c -lmicrohttpd -lpam -lpam_misc`
+  - Genera el ejecutable `api_server` a partir del código fuente, enlazando todas las bibliotecas necesarias.
+
+- **`clean:`**: Regla de limpieza que:
+  - Elimina el archivo ejecutable generado (`api_server`).
+  - Útil para limpiar el directorio antes de una nueva compilación o para eliminar archivos temporales.
+  - Se ejecuta con: `make clean`
+
+- **`run: $(TARGET)`**: Regla de conveniencia que:
+  - Depende de `$(TARGET)`, asegurando que el programa esté compilado.
+  - Ejecuta el servidor compilado con `./$(TARGET)`.
+  - Se ejecuta con: `make run`
+  - Facilita el proceso de compilación y ejecución en un solo comando.
+
+### Uso del Makefile
+
+**Compilar el servidor:**
+```bash
+make
+```
+Este comando compila el código fuente y genera el ejecutable `api_server`.
+
+**Limpiar archivos compilados:**
+```bash
+make clean
+```
+Este comando elimina el ejecutable generado, útil para forzar una recompilación completa.
+
+**Compilar y ejecutar:**
+```bash
+make run
+```
+Este comando compila (si es necesario) y ejecuta inmediatamente el servidor.
+
+**Compilación manual equivalente:**
+```bash
+gcc -Wall -Wextra -o api_server main.c -lmicrohttpd -lpam -lpam_misc
+```
+
+### Dependencias Requeridas
+
+Antes de compilar, es necesario instalar las bibliotecas de desarrollo en el sistema:
+
+**En sistemas basados en Debian/Ubuntu:**
+```bash
+sudo apt-get install libmicrohttpd-dev libpam0g-dev
+```
+
+### Ventajas del Uso de Makefile
+
+- **Automatización:** Simplifica el proceso de compilación con un solo comando.
+- **Gestión de Dependencias:** Recompila automáticamente solo cuando los archivos fuente cambian.
+- **Portabilidad:** Facilita la compilación del proyecto en diferentes sistemas con la misma configuración.
+- **Mantenibilidad:** Centraliza la configuración de compilación, facilitando cambios futuros en flags o bibliotecas.
+- **Productividad:** Las reglas `clean` y `run` aceleran el ciclo de desarrollo.
 
 ---
 
 ## Implementación del Frontend (Aplicación Web)
 
-La aplicación web proporciona una interfaz intuitiva para interactuar con el sistema remoto, permitiendo visualización del escritorio, control del mouse y teclado, y monitorización de recursos.
+La aplicación web proporciona una interfaz intuitiva desarrollada en React para interactuar con el sistema remoto, implementando autenticación, visualización del escritorio en tiempo real, control de mouse y teclado, y monitorización de recursos del sistema.
 
 ### Tecnologías Utilizadas
 
-- [LISTA DE TECNOLOGÍAS]
+- **React 18**: Framework principal para la construcción de la interfaz de usuario
+- **React Hook Form**: Gestión de formularios con validación
+- **Yup**: Esquemas de validación para formularios
+- **Axios**: Cliente HTTP para comunicación con la API
+- **SweetAlert2**: Alertas y notificaciones modales
+- **React Router DOM**: Navegación entre vistas
+- **Tailwind CSS**: Framework de estilos utility-first
+- **Lucide React**: Biblioteca de iconos
 
 ### Arquitectura del Frontend
 
-[DESCRIPCIÓN DE LA ARQUITECTURA]
+La aplicación sigue una arquitectura basada en componentes de React, utilizando hooks para gestión de estado y efectos secundarios. Se compone de dos vistas principales (Login y Dashboard) conectadas mediante React Router, con comunicación HTTP hacia la API backend en el puerto 8081.
 
-### Funcionalidades Implementadas
+## Vista de Login
 
-**Visualización del Escritorio en Tiempo Real:**
+La vista de Login implementa autenticación de usuarios mediante PAM, validación de formularios en tiempo real y feedback visual del estado de los campos.
 
-- **Implementación:** [DETALLES]
-- **Tasa de refresco:** [ESPECIFICACIONES]
+### Funcionalidades Principales
 
-**Control de Mouse:**
+**Validación de Formularios:**
+- **Esquema Yup**: Define reglas de validación para usuario (3-20 caracteres) y contraseña (mínimo 3 caracteres)
+- **Validación en Tiempo Real**: Modo `onChange` proporciona feedback inmediato mientras el usuario escribe
+- **Estados Visuales**: Los campos muestran tres estados (normal, válido, error) con iconos y colores correspondientes
 
-- **Implementación:** [DETALLES]
-- **Funcionalidades:** Movimiento, click izquierdo, click derecho
+**Autenticación:**
+- **Petición POST**: Envía credenciales al endpoint `/login` de la API
+- **Gestión de Sesión**: Almacena usuario y grupo en `localStorage` tras autenticación exitosa
+- **Navegación**: Redirecciona automáticamente al Dashboard después de login exitoso
+- **Manejo de Errores**: Muestra alertas diferenciadas para errores de autenticación y conexión
 
-**Control de Teclado:**
+### Características de UI/UX
 
-- **Implementación:** [DETALLES]
-- **Funcionalidades:** Teclas alfanuméricas
+- **Validación Visual**: Iconos de estado (CheckCircle para válido, AlertCircle para error) y cambios de color en bordes
+- **Toggle de Contraseña**: Botón Eye/EyeOff para mostrar/ocultar contraseña
+- **Estados de Botón**: Deshabilitado cuando el formulario es inválido o está cargando
+- **Animaciones**: Transiciones suaves con `hover:scale` y shadows
+- **Responsive**: Diseño adaptable con Tailwind CSS
+
+### Captura de Pantalla - Login
+
+![Vista de Login con validación en tiempo real, mostrando campos de usuario y contraseña con estados visuales diferenciados](./Img/Login.png)
+
+## Vista de Dashboard
+
+La vista de Dashboard implementa la funcionalidad completa de escritorio remoto, incluyendo visualización en tiempo real, monitorización de recursos, y control de mouse y teclado según los permisos del usuario.
+
+### Funcionalidades Principales
 
 **Monitorización de Recursos:**
+- **CPU y RAM**: Polling cada 2 segundos a endpoints `/cpu` y `/ram`, mostrando porcentajes de uso y disponibilidad en tiempo real
+- **Visualización**: Cards con iconos, barras de progreso visuales y colores diferenciados (usado en gris, libre en verde)
 
-- **CPU:** [DETALLES]
-- **Memoria RAM:** [DETALLES]
+**Captura de Pantalla:**
+- **Streaming en Tiempo Real**: Actualización automática cada 1 segundo desde endpoint `/pantalla`
+- **Conversión PPM a PNG**: Función `ConvertirPPM_PNG()` procesa el formato PPM recibido del backend, parseando el encabezado, extrayendo dimensiones y datos de píxeles, y convirtiéndolo a PNG mediante Canvas API
+- **Detección de Resolución**: Obtiene dinámicamente la resolución del sistema cada 2 segundos para calcular coordenadas precisas
 
-### Fragmento de Código Relevante
+**Control de Mouse:**
+- **Mapeo de Coordenadas**: Convierte clicks del navegador a coordenadas absolutas del sistema remoto usando la resolución detectada
+- **Soporte de Botones**: Click izquierdo (botón 0) y derecho (botón 1/2) con prevención del menú contextual nativo
+- **Cálculo Preciso**: `((clientX - rect.left) / rect.width) * 100` para porcentaje, luego `(porcentaje / 100) * resolucion.ancho` para píxel exacto
 
-```javascript
-// [CÓDIGO DEL FRONTEND]
-```
+**Control de Teclado:**
+- **Mapeo Completo**: Diccionario `mapearTeclaALinux()` convierte códigos JavaScript (`event.code`) a códigos de tecla Linux (KEY_* de input.h)
+- **Soporte Extendido**: Incluye alfanuméricos, teclas especiales (F1-F12, flechas, Home, End, etc.), modificadores (Shift, Ctrl, Alt) y numpad
+- **Prevención de Eventos**: `e.preventDefault()` evita que el navegador procese las teclas localmente
 
-### Capturas de Pantalla
+**Control de Acceso Basado en Grupos:**
+- **remote_view**: Solo puede visualizar el escritorio, controles deshabilitados con overlay "Solo Vista"
+- **remote_control**: Acceso completo con mouse y teclado habilitados, indicadores visuales en verde
 
-**Vista de Login:**
+### Características de UI/UX
 
-[DESCRIPCIÓN O IMAGEN]
+**Indicadores Visuales:**
+- **Estado de Conexión**: Badge "Activo" con animación pulse en verde
+- **Último Input**: Border dinámico que cambia de color según última interacción (azul para mouse, púrpura para teclado)
+- **Permisos**: Overlay semitransparente con badge "Solo Vista" para usuarios sin control
 
-**Vista de Dashboard:**
+**Interactividad:**
+- **Focus Management**: `tabIndex={0}` permite que el contenedor reciba eventos de teclado
+- **Aspect Ratio**: Mantiene proporciones correctas usando `aspectRatio: ${ancho} / ${alto}`
+- **Cursores**: `cursor-crosshair` para control total, `cursor-not-allowed` para solo vista
 
-[DESCRIPCIÓN O IMAGEN]
+**Polling Inteligente:**
+- CPU/RAM: 2 segundos de intervalo
+- Pantalla: 1 segundo de intervalo (~1 FPS)
+- Resolución: 2 segundos de intervalo
+- Limpieza automática con `clearInterval` en `useEffect` cleanup
 
-**Vista de Control Remoto:**
+### Captura de Pantalla - Dashboard
 
-[DESCRIPCIÓN O IMAGEN]
+![Vista del Dashboard mostrando escritorio remoto en tiempo real con monitorización de CPU y RAM, controles de mouse y teclado activos para usuarios con permisos remote_control](./Img/Dashboard.png)
 
 ---
 
@@ -512,100 +883,97 @@ La aplicación web proporciona una interfaz intuitiva para interactuar con el si
 
 Durante el desarrollo del proyecto USACLinux, se encontraron diversos desafíos técnicos relacionados con la implementación de syscalls, la integración con PAM y el desarrollo de la interfaz web. A continuación, se detallan tres errores significativos, las fuentes consultadas y las soluciones aplicadas.
 
-### Error 1: [TÍTULO DEL ERROR]
+---
+
+### Error 1: Error de Compilación por Falta de Inclusión de `<linux/kernel_stat.h>`
 
 **Información del Error:**
 
-[DESCRIPCIÓN DETALLADA DEL ERROR CON MENSAJE DE ERROR]
+Durante la implementación de `sys_cpu_percentage` en `kernel/syscall_pf_1.c`, se intentó acceder a las estadísticas de CPU mediante la estructura `kernel_cpustat` y la macro `kcpustat_cpu()`. Sin embargo, al compilar el kernel con `make -j$(nproc)`, se generó el siguiente error:
+
+```bash
+kernel/syscall_pf_1.c: In function '__do_sys_cpu_percentage':
+kernel/syscall_pf_1.c:23:9: error: implicit declaration of function 'kcpustat_cpu' [-Werror=implicit-function-declaration]
+   23 |         struct kernel_cpustat *kcpustat = &kcpustat_cpu(cpu);
+      |         ^~~~~~~~~~~~~~~~~~~~~
+kernel/syscall_pf_1.c:23:48: error: invalid type argument of unary '*' (have 'int')
+   23 |         struct kernel_cpustat *kcpustat = &kcpustat_cpu(cpu);
+      |                                                ^
+kernel/syscall_pf_1.c:24:23: error: request for member 'cpustat' in something not a structure or union
+   24 |         user    += kcpustat->cpustat[CPUTIME_USER];
+      |                       ^~
+cc1: some warnings being treated as errors
+make[3]: *** [scripts/Makefile.build:229: kernel/syscall_pf_1.o] Error 1
+```
+
+Este error indicó que la función `kcpustat_cpu()` no estaba declarada y que el compilador no podía acceder a la estructura `kernel_cpustat` correctamente.
 
 **Fuentes que Ayudaron a Resolverlo:**
 
-- [FUENTE 1]
-- [FUENTE 2]
-- [FUENTE 3]
-
-**Código Antes de la Solución:**
-
-```c
-// [CÓDIGO CON ERROR]
-```
-
-**Código Después de la Solución:**
-
-```c
-// [CÓDIGO CORREGIDO]
-```
+- **Código fuente del kernel:** Revisión de `kernel/sched/cputime.c` donde se usa `kcpustat_cpu()`, identificando que requiere la inclusión de `<linux/kernel_stat.h>`.
+- **Documentación del kernel:** `include/linux/kernel_stat.h`, que define la estructura `kernel_cpustat` y las macros para acceder a las estadísticas por CPU.
+- **Manual de estadísticas del kernel:** Guías sobre cómo acceder correctamente a las estadísticas de tiempo de CPU en el kernel.
 
 **Solución Encontrada:**
 
-[EXPLICACIÓN DETALLADA DE LA SOLUCIÓN]
+Se agregó la inclusión de `<linux/kernel_stat.h>` en la línea 7 de `kernel/syscall_pf_1.c`, justo después de las otras inclusiones. Este header define la estructura `kernel_cpustat`, la macro `kcpustat_cpu()` para acceder a las estadísticas por CPU, y las constantes `CPUTIME_USER`, `CPUTIME_NICE`, `CPUTIME_SYSTEM`, etc. Con esta inclusión, el compilador pudo resolver correctamente todas las referencias a las estadísticas de CPU, permitiendo que la syscall compile y funcione correctamente al agregar los tiempos de todos los núcleos y calcular los porcentajes de uso.
 
 ---
 
-### Error 2: [TÍTULO DEL ERROR]
+### Error 2: Error de Compilación por Falta de Inclusión de `<linux/mm.h>`
 
 **Información del Error:**
 
-[DESCRIPCIÓN DETALLADA DEL ERROR]
+Durante la implementación de `sys_ram_percentage` en `kernel/syscall_pf_2.c`, se intentó utilizar la función `si_meminfo()` para obtener información de memoria del sistema. Sin embargo, al compilar el kernel con `make -j$(nproc)`, se generó el siguiente error:
+
+```bash
+kernel/syscall_pf_2.c: In function '__do_sys_ram_percentage':
+kernel/syscall_pf_2.c:17:5: error: implicit declaration of function 'si_meminfo' [-Werror=implicit-function-declaration]
+   17 |     si_meminfo(&si);
+      |     ^~~~~~~~~~
+cc1: some warnings being treated as errors
+make[3]: *** [scripts/Makefile.build:229: kernel/syscall_pf_2.o] Error 1
+make[2]: *** [scripts/Makefile.build:478: kernel] Error 2
+```
+
+Este error indicó que la función `si_meminfo()` no estaba declarada y el compilador no podía encontrar su definición.
 
 **Fuentes que Ayudaron a Resolverlo:**
 
-- [FUENTE 1]
-- [FUENTE 2]
-- [FUENTE 3]
-
-**Código Antes de la Solución:**
-
-```c
-// [CÓDIGO CON ERROR]
-```
-
-**Código Después de la Solución:**
-
-```c
-// [CÓDIGO CORREGIDO]
-```
+- **Código fuente del kernel:** Revisión de `mm/page_alloc.c` donde se implementa `si_meminfo()`, confirmando que está declarada en `<linux/mm.h>`.
+- **Documentación del kernel:** `include/linux/mm.h`, que contiene las declaraciones de funciones relacionadas con la gestión de memoria, incluyendo `si_meminfo()`.
+- **Manual de gestión de memoria:** Guías sobre cómo acceder a información de memoria del sistema desde el kernel.
 
 **Solución Encontrada:**
 
-[EXPLICACIÓN DETALLADA DE LA SOLUCIÓN]
+Se agregó la inclusión de `<linux/mm.h>` en la línea 6 de `kernel/syscall_pf_2.c`. Este header define la función `si_meminfo()` que llena la estructura `sysinfo` con información actualizada de la memoria del sistema, incluyendo memoria total, libre, buffers, cache y swap. Con esta inclusión, el compilador pudo resolver correctamente la referencia a `si_meminfo()`, permitiendo que la syscall obtenga las estadísticas de RAM y calcule los porcentajes de uso correctamente.
 
 ---
 
-### Error 3: [TÍTULO DEL ERROR]
+### Error 3: Error de Compilación por Inclusión de `asm/screen_info.h`
 
 **Información del Error:**
 
-[DESCRIPCIÓN DETALLADA DEL ERROR]
+Se intentó incluir el encabezado `<asm/screen_info.h>` en `kernel/syscall_pf_3.c` para obtener información de la pantalla a través de datos del arranque del sistema. Sin embargo, al compilar el kernel con `make -j$(nproc)`, se generó el siguiente error:
+
+```bash
+kernel/syscall_pf_3.c:4:10: fatal error: asm/screen_info.h: No existe el archivo o el directorio
+    4 | #include <asm/screen_info.h>
+      |          ^~~~~~~~~~~~~~~~~~~
+compilation terminated.
+make[3]: *** [scripts/Makefile.build:229: kernel/syscall_pf_3.o] Error 1
+make[2]: *** [scripts/Makefile.build:478: kernel] Error 2
+make[2]: *** Se espera a que terminen otras tareas....
+```
+
+Este error indicó que `asm/screen_info.h` no estaba disponible o no era accesible en el contexto del archivo fuente, impidiendo la compilación del módulo de la syscall.
 
 **Fuentes que Ayudaron a Resolverlo:**
 
-- [FUENTE 1]
-- [FUENTE 2]
-- [FUENTE 3]
-
-**Código Antes de la Solución:**
-
-```c
-// [CÓDIGO CON ERROR]
-```
-
-**Código Después de la Solución:**
-
-```c
-// [CÓDIGO CORREGIDO]
-```
+- **Documentación del kernel:** `Documentation/x86/boot.txt`, que explica que `screen_info` es una estructura utilizada principalmente durante el arranque del sistema (boot time) y no está diseñada para uso en tiempo de ejecución dentro de syscalls.
+- **Manual de include/uapi:** Revisión de los encabezados disponibles en el kernel, confirmando que `screen_info.h` no es una dependencia estándar ni recomendada para el subsistema framebuffer (`fbdev`).
+- **Foro de Linux Kernel Mailing List:** Discusiones sobre métodos alternativos para obtener información de pantalla, recomendando evitar `screen_info` en favor de las APIs del subsistema `fbdev` y DRM para acceso en tiempo de ejecución.
 
 **Solución Encontrada:**
 
-[EXPLICACIÓN DETALLADA DE LA SOLUCIÓN]
-
----
-
-## Conclusiones
-
-[CONCLUSIONES DEL PROYECTO]
-
----
-
-Ahora puedes compartirme los detalles de cada syscall (syscall_pf_1.c, syscall_pf_2.c, syscall_pf_3.c) para que complete las secciones correspondientes con los objetivos y explicaciones de implementación.
+Se eliminó completamente la inclusión de `<asm/screen_info.h>` en `kernel/syscall_pf_3.c`. En su lugar, se implementó la función `obtener_resolucion_pantalla()` que lee dinámicamente la resolución desde el sistema de archivos virtual DRM (`/sys/class/drm/card0-Virtual-1/modes`) utilizando `filp_open()` y `kernel_read()`. Esta solución lee el archivo en formato "WIDTHxHEIGHT" y lo parsea con `sscanf()` para obtener las dimensiones exactas. Este enfoque es compatible con el entorno virtualizado de VMware y permite la detección dinámica de resolución durante la inicialización del dispositivo de mouse virtual mediante `device_initcall()`, evitando la dependencia de estructuras de boot-time y asegurando la compilación exitosa del kernel.

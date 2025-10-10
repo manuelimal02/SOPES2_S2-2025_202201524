@@ -32,12 +32,17 @@ id
 
 ## Agregar nuevo usuario
 ```bash
-sudo adduser pruebaproyecto
+sudo adduser manuel1
+```
+
+## Eliminar nuevo usuario
+```bash
+sudo deluser --remove-home manuel1
 ```
 
 ## Asignar usuario al grupo remote_view
 ```bash
-sudo usermod -a -G remote_view $USER
+sudo usermod -a -G remote_view manuel1
 ```
 
 ## Asignar usuario al grupo remote_control
