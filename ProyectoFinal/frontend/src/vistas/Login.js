@@ -5,7 +5,7 @@ import * as yup from 'yup';
 import { Monitor, Eye, EyeOff, User, Lock, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
-//import axios from 'axios';
+import axios from 'axios';
 
 const esquemaValidacion = yup.object({
     nombreUsuario: yup
@@ -16,7 +16,7 @@ const esquemaValidacion = yup.object({
     contrasena: yup
         .string()
         .required('La contraseña es requerida.')
-        .min(6, 'Debe tener al menos 6 caracteres.')
+        .min(3, 'Debe tener al menos 3 caracteres.')
 });
 
 export default function Login() {
@@ -39,54 +39,43 @@ export default function Login() {
     const alEnviar = async (datos) => {
         setCargando(true);
 
-        Swal.fire({
-            icon: 'success',
-            title: 'Bienvenido A USACLinux',
-            text: 'Inicio De Sesión Exitoso.',
-            confirmButtonColor: '#059669' // emerald-600
-        });
-        localStorage.setItem('usuario', JSON.stringify("Usuario Demo"));
-        localStorage.setItem('grupo', JSON.stringify("remote_control"));
-        navigate('/dashboard');
-        /*
         try {
-            const respuesta = await axios.post( "/iniciar-sesion", {
-                nombre_usuario: datos.nombreUsuario,
+            const { data } = await axios.post('http://localhost:8081/login', {
+                usuario: datos.nombreUsuario,
                 contrasena: datos.contrasena
             });
 
-            if (respuesta.data.success) {
+            if (data && data.usuario && data.grupo) {
                 Swal.fire({
                     icon: 'success',
-                    title: 'Bienvenido A USACLinux',
-                    text: 'Inicio De Sesión Exitoso.',
-                    confirmButtonColor: '#059669' // emerald-600
+                    title: 'Bienvenido a USACLinux',
+                    text: 'Inicio de sesión exitoso.',
+                    confirmButtonColor: '#059669'
                 });
-                console.log(respuesta.data.datos_usuario);
-                localStorage.setItem('usuario', JSON.stringify(respuesta.data.datos_usuario));
-                navigate('/cliente');
-            }
-        } catch (error) {
-            console.error('Error al iniciar sesión:', error);
-            if (error.response) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Error Al Iniciar Sesión',
-                    text: error.response.data.mensaje,
-                    confirmButtonColor: '#dc2626' // red-600
-                });
+                localStorage.setItem('usuario', JSON.stringify(data.usuario));
+                localStorage.setItem('grupo', JSON.stringify(data.grupo));
+                navigate('/dashboard');
             } else {
                 Swal.fire({
                     icon: 'error',
-                    title: 'Error de Conexión',
-                    text: 'No se pudo conectar al servidor',
-                    confirmButtonColor: '#dc2626' // red-600
+                    title: 'Error al iniciar sesión',
+                    text: data.mensaje || 'Credenciales inválidas',
+                    confirmButtonColor: '#dc2626'
                 });
             }
+        } catch (error) {
+            console.error('Error al iniciar sesión:', error);
+            Swal.fire({
+                icon: 'error',
+                title: 'Error de conexión',
+                text: 'No se pudo conectar al servidor',
+                confirmButtonColor: '#dc2626'
+            });
         } finally {
             setCargando(false);
-        }*/
+        }
     };
+
 
     const obtenerEstadoCampo = (nombreCampo) => {
         const tieneError = errors[nombreCampo];

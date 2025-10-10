@@ -5,6 +5,9 @@
 #include <linux/input.h>
 #include <sys/syscall.h>
 #include <microhttpd.h>
+#include <security/pam_appl.h>
+#include <security/pam_misc.h>
+#include <grp.h>
 
 #define PUERTO 8081
 #define SYS_SEND_KEY_EVENT 549
@@ -77,6 +80,59 @@ char *convertir_a_ppm(int ancho, int alto, const unsigned char *buffer, size_t *
     }
     *tamano_ppm = tamano_total;
     return datos_ppm;
+}
+
+//FUNCION CALLBACK CON PAM
+int conversacion_pam(int num_msg, const struct pam_message **msg, 
+                     struct pam_response **resp, void *appdata_ptr) {
+    char *usuario_contra = (char *)appdata_ptr;
+    char *contrasena = strchr(usuario_contra, ':');
+    if (!contrasena) return PAM_CONV_ERR;
+
+    *contrasena = '\0';
+    contrasena++;
+
+    *resp = calloc(num_msg, sizeof(struct pam_response));
+    if (!*resp) return PAM_CONV_ERR;
+
+    for (int i = 0; i < num_msg; i++) {
+        switch (msg[i]->msg_style) {
+            case PAM_PROMPT_ECHO_OFF:
+                (*resp)[i].resp = strdup(contrasena);
+                break;
+            case PAM_PROMPT_ECHO_ON:
+                (*resp)[i].resp = strdup(usuario_contra);
+                break;
+            default:
+                (*resp)[i].resp = NULL;
+                break;
+        }
+    }
+    return PAM_SUCCESS;
+}
+
+const char *verificar_grupo_usuario(const char *usuario) {
+    struct group *grupo;
+    gid_t *grupos = NULL;
+    int cantidad = 0;
+
+    if (getgrouplist(usuario, getgid(), NULL, &cantidad) == -1) {
+        grupos = malloc(cantidad * sizeof(gid_t));
+        if (getgrouplist(usuario, getgid(), grupos, &cantidad) != -1) {
+            for (int i = 0; i < cantidad; i++) {
+                grupo = getgrgid(grupos[i]);
+                if (grupo && (
+                    strcmp(grupo->gr_name, "remote_view") == 0 ||
+                    strcmp(grupo->gr_name, "remote_control") == 0)) {
+                    const char *nombre = strdup(grupo->gr_name);
+                    free(grupos);
+                    return nombre;
+                }
+            }
+        }
+        free(grupos);
+    }
+    return NULL;
 }
 
 // FUNCIÓN PARA AGREGAR HEADERS CORS
@@ -259,6 +315,57 @@ static enum MHD_Result manejar_solicitud(void *cls, struct MHD_Connection *conex
             snprintf(buffer, sizeof(buffer), "{\"error\": \"Sin datos en la petición\"}");
         }
     }
+    // ENDPOINT: /login
+    else if (strcmp(url, "/login") == 0 && strcmp(metodo, "POST") == 0) {
+        if (info_con->datos && info_con->tamano > 0) {
+            char usuario[100] = {0};
+            char contrasena[100] = {0};
+            char credenciales[200] = {0};
+            pam_handle_t *pamh = NULL;
+            struct pam_conv conversacion = { conversacion_pam, NULL };
+            int resultado;
+
+            char *u_ptr = strstr(info_con->datos, "\"usuario\"");
+            char *p_ptr = strstr(info_con->datos, "\"contrasena\"");
+            if (u_ptr) sscanf(u_ptr, "\"usuario\":\"%99[^\"]\"", usuario);
+            if (p_ptr) sscanf(p_ptr, "\"contrasena\":\"%99[^\"]\"", contrasena);
+
+            if (strlen(usuario) == 0 || strlen(contrasena) == 0) {
+                snprintf(buffer, sizeof(buffer), "{\"error\": \"Datos incompletos\"}");
+            } else {
+                snprintf(credenciales, sizeof(credenciales), "%s:%s", usuario, contrasena);
+                conversacion.appdata_ptr = credenciales;
+
+                resultado = pam_start("login", usuario, &conversacion, &pamh);
+                if (resultado == PAM_SUCCESS)
+                    resultado = pam_authenticate(pamh, 0);
+
+                if (resultado == PAM_SUCCESS)
+                    resultado = pam_acct_mgmt(pamh, 0);
+
+                if (resultado == PAM_SUCCESS) {
+                    const char *grupo = verificar_grupo_usuario(usuario);
+                    if (grupo) {
+                        snprintf(buffer, sizeof(buffer),
+                            "{\"estado\": \"exito\", \"usuario\": \"%s\", \"grupo\": \"%s\"}",
+                            usuario, grupo);
+                        free((void*)grupo);
+                    } else {
+                        snprintf(buffer, sizeof(buffer),
+                            "{\"error\": \"No pertenece a un grupo autorizado\"}");
+                    }
+                } else {
+                    snprintf(buffer, sizeof(buffer),
+                        "{\"error\": \"Autenticación fallida\"}");
+                }
+
+                pam_end(pamh, resultado);
+            }
+        } else {
+            snprintf(buffer, sizeof(buffer), "{\"error\": \"Sin datos en la petición\"}");
+        }
+    }
+
     // ENDPOINT raíz
     else if (strcmp(url, "/") == 0) {
         snprintf(buffer, sizeof(buffer), "{\"mensaje\": \"API USACLinux\"}");
@@ -298,10 +405,3 @@ int main() {
     printf("\n[INFO] Servidor detenido\n");
     return 0;
 }
-
-/*
-Compilación:
-Make clean
-Make
-Make run
-*/

@@ -8,7 +8,7 @@
 #include <linux/delay.h>
 
 static struct input_dev *mouse_click_202201524;
-static int ancho_pantalla = 1718, alto_pantalla = 888;
+static int ancho_pantalla = 0, alto_pantalla = 0;
 
 int obtener_resolucion_pantalla(int *ancho, int *alto)
 {

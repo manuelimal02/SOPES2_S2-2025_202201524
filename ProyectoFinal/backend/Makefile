@@ -1,7 +1,6 @@
-# Makefile
 CC = gcc
 CFLAGS = -Wall -Wextra
-LIBS = -lmicrohttpd
+LIBS = -lmicrohttpd -lpam -lpam_misc
 
 TARGET = api_server
 SRC = main.c
