@@ -6,7 +6,6 @@ import { Monitor, Eye, EyeOff, User, Lock, AlertCircle, CheckCircle, LogIn } fro
 import Swal from 'sweetalert2';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-
 const esquemaValidacion = yup.object({
     nombreUsuario: yup
         .string()
@@ -46,15 +45,26 @@ export default function Login() {
             });
 
             if (data && data.usuario && data.grupo) {
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Bienvenido a USACLinux',
-                    text: 'Inicio de sesión exitoso.',
-                    confirmButtonColor: '#059669'
-                });
                 localStorage.setItem('usuario', JSON.stringify(data.usuario));
                 localStorage.setItem('grupo', JSON.stringify(data.grupo));
-                navigate('/dashboard');
+                console.log(data.usuario);
+                if (data.grupo === 'calificacion') {
+                    navigate('/recursos');
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Bienvenido a USACLinux Recursos',
+                        text: 'Inicio de sesión exitoso.',
+                        confirmButtonColor: '#059669'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Bienvenido a USACLinux',
+                        text: 'Inicio de sesión exitoso.',
+                        confirmButtonColor: '#059669'
+                    });
+                    navigate('/dashboard');
+                }
             } else {
                 Swal.fire({
                     icon: 'error',

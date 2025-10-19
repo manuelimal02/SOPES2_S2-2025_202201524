@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./vistas/Login";
 import Dashboard from "./vistas/Dashboard";
+import DashboardRecursos from "./vistas/VistaRecursos";
 
 function RutaProtegida({ children }) {
   const usuario = localStorage.getItem("usuario");
@@ -19,6 +20,14 @@ function App() {
         element={
           <RutaProtegida>
             <Dashboard />
+          </RutaProtegida>
+        }
+      />
+      <Route
+        path="/recursos"
+        element={
+          <RutaProtegida>
+            <DashboardRecursos />
           </RutaProtegida>
         }
       />
